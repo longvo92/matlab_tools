@@ -1,0 +1,16 @@
+# MATLAB / Simulink build & scratch artifacts
+*.asv
+*.autosave
+*.m~
+*.slxc
+slprj/
+sccprj/
+codegen/
+*.mex*
+*.slx.original
+*.req~
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
