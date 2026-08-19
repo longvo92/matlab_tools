@@ -1,91 +1,68 @@
-function quickSimEnv(model, dataFile, configVar, opts)
-%QUICKSIMENV Load a data .mat into the base workspace and link a config set to a model.
+function model = quickSimEnv(dataFile)
+%QUICKSIMENV Spin up a fresh model, load a data .mat, and grab a config set from the workspace.
 %
-%   Fast one-call setup before hitting "Run": drop your simulation data into the
-%   base workspace and attach a configuration set that stays *linked* to a
-%   workspace variable (a config reference), so editing the variable keeps the
-%   model in sync instead of baking in a private copy.
+%   Fast pre-run setup in one call:
+%     1. Creates a new empty model and opens it (like Ctrl+N).
+%     2. Loads the .mat you name into the base workspace.
+%     3. Scans the base workspace for a Simulink.ConfigSet and links it to the
+%        new model as the active configuration (a config reference, so the model
+%        stays in sync with the workspace variable).
 %
-%   QUICKSIMENV(MODEL, DATAFILE, CONFIGVAR)
-%       MODEL      model name or handle. Opened (load_system) if not loaded.
-%       DATAFILE   path to a .mat file; every variable in it is pushed into the
-%                  base workspace. Pass '' to skip data loading.
-%       CONFIGVAR  name of a Simulink.ConfigSet variable already in the base
-%                  workspace, to attach to MODEL. Pass '' to skip config setup.
+%   MODEL = QUICKSIMENV(DATAFILE)
+%       DATAFILE   name/path of a .mat file whose variables are pushed into the
+%                  base workspace. Omit or pass '' to skip data loading.
+%   MODEL is the name of the new model.
 %
-%   QUICKSIMENV(..., OPTS) with an options struct:
-%       .link       logical (default true)   true attaches a Simulink.ConfigSetRef
-%                   pointing at CONFIGVAR (stays linked); false attaches a copy
-%                   of the ConfigSet itself.
-%       .refName    char   (default 'CfgRef') name of the attached config set.
-%       .makeActive logical (default true)    make the attached config active.
-%       .overwrite  logical (default true)    overwrite base workspace variables
-%                   that collide with names in DATAFILE.
+%   The config set is found automatically: the first base workspace variable of
+%   class Simulink.ConfigSet (or Simulink.ConfigSetRef) is used. If none exists,
+%   the model keeps its default configuration and a note is printed.
 %
 %   Examples:
-%       quickSimEnv('myPlant', 'stimuli/drive_cycle.mat', 'simCfg')
-%       quickSimEnv(gcs, 'io.mat', 'cfg', struct('link', false))
+%       quickSimEnv('drive_cycle.mat')
+%       quickSimEnv                     % new model + config, no data
 %
 %   Copy this file anywhere on the MATLAB path and call it; it has no
 %   dependencies on other files in this repository.
 
-    if nargin < 1 || isempty(model)
-        model = bdroot(gcs);
+    if nargin < 1
+        dataFile = '';
     end
-    if nargin < 2, dataFile = ''; end
-    if nargin < 3, configVar = ''; end
-    if nargin < 4, opts = struct(); end
-    opts = local_defaults(opts);
 
-    modelName = local_ensureLoaded(model);
+    model = local_newModel();
+    open_system(model);
 
     if ~isempty(dataFile)
-        local_loadData(dataFile, opts.overwrite);
+        local_loadData(dataFile);
     end
 
-    if ~isempty(configVar)
-        local_attachConfig(modelName, configVar, opts);
+    local_attachWorkspaceConfig(model);
+
+    if nargout == 0
+        clear model;
     end
 end
 
 % -------------------------------------------------------------------------
-function opts = local_defaults(opts)
-    defaults = struct('link', true, 'refName', 'CfgRef', ...
-                      'makeActive', true, 'overwrite', true);
-    fn = fieldnames(defaults);
-    for i = 1:numel(fn)
-        if ~isfield(opts, fn{i}) || isempty(opts.(fn{i}))
-            opts.(fn{i}) = defaults.(fn{i});
-        end
+function name = local_newModel()
+    % Mimic Ctrl+N: create a uniquely named empty model without asking for a name.
+    base = 'untitled';
+    name = base;
+    k = 0;
+    while exist(name, 'file') == 4 || bdIsLoaded(name)
+        k = k + 1;
+        name = sprintf('%s%d', base, k);
     end
+    new_system(name, 'Model');
 end
 
 % -------------------------------------------------------------------------
-function modelName = local_ensureLoaded(model)
-    if ischar(model) || isstring(model)
-        modelName = char(model);
-    else
-        modelName = get_param(model, 'Name');
-    end
-    if isempty(modelName)
-        error('quickSimEnv:noModel', 'No model given and no current system.');
-    end
-    if ~bdIsLoaded(modelName)
-        load_system(modelName);
-    end
-end
-
-% -------------------------------------------------------------------------
-function local_loadData(dataFile, overwrite)
+function local_loadData(dataFile)
     if exist(dataFile, 'file') ~= 2
         error('quickSimEnv:noData', 'Data file not found: %s', dataFile);
     end
     S = load(dataFile);
     names = fieldnames(S);
     for i = 1:numel(names)
-        if ~overwrite && evalin('base', sprintf('exist(''%s'', ''var'')', names{i}))
-            continue;
-        end
         assignin('base', names{i}, S.(names{i}));
     end
     fprintf('Loaded %d variable(s) from %s into base workspace.\n', ...
@@ -93,36 +70,35 @@ function local_loadData(dataFile, overwrite)
 end
 
 % -------------------------------------------------------------------------
-function local_attachConfig(modelName, configVar, opts)
-    if ~evalin('base', sprintf('exist(''%s'', ''var'')', configVar))
-        error('quickSimEnv:noConfigVar', ...
-              'Config variable ''%s'' not found in base workspace.', configVar);
+function local_attachWorkspaceConfig(model)
+    varName = local_findConfigVar();
+    if isempty(varName)
+        fprintf('No Simulink.ConfigSet found in base workspace; using default config.\n');
+        return;
     end
 
-    if opts.link
-        csObj = Simulink.ConfigSetRef;
-        csObj.Name = opts.refName;
-        csObj.SourceName = configVar;   % live link to the base workspace variable
-    else
-        csObj = copy(evalin('base', configVar));
-        csObj.Name = opts.refName;
-    end
+    refName = 'CfgRef';
+    csr = Simulink.ConfigSetRef;
+    csr.Name = refName;
+    csr.SourceName = varName;   % live link to the base workspace variable
 
-    % Replace an existing config set of the same name before attaching.
-    existing = getConfigSet(modelName, opts.refName);
-    if ~isempty(existing)
-        detachConfigSet(modelName, opts.refName);
+    if ~isempty(getConfigSet(model, refName))
+        detachConfigSet(model, refName);
     end
-    attachConfigSet(modelName, csObj, true);
-
-    if opts.makeActive
-        setActiveConfigSet(modelName, opts.refName);
-    end
-    fprintf('Attached config ''%s'' (%s) to %s.\n', opts.refName, ...
-            ternary(opts.link, 'linked', 'copy'), modelName);
+    attachConfigSet(model, csr, true);
+    setActiveConfigSet(model, refName);
+    fprintf('Linked config ''%s'' from base workspace to %s.\n', varName, model);
 end
 
 % -------------------------------------------------------------------------
-function out = ternary(cond, a, b)
-    if cond, out = a; else, out = b; end
+function varName = local_findConfigVar()
+    % First base workspace variable holding a config set (or config reference).
+    varName = '';
+    vars = evalin('base', 'whos');
+    for i = 1:numel(vars)
+        if any(strcmp(vars(i).class, {'Simulink.ConfigSet', 'Simulink.ConfigSetRef'}))
+            varName = vars(i).name;
+            return;
+        end
+    end
 end

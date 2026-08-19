@@ -21,7 +21,7 @@ and an example, so `help <functionName>` works after you copy it in.
 | Tool | File | What it does |
 |------|------|--------------|
 | Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names Bus Selector output / Bus Creator input signals after their top-level bus element and turns on propagated-signal display. Built for AUTOSAR-style models. |
-| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Loads a data `.mat` into the base workspace and attaches a (linked) config set to a model in one call. |
+| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, loads a data `.mat` you name into the base workspace, and auto-links the first config set found in the base workspace. |
 
 ## Usage
 
@@ -31,8 +31,8 @@ Copy a tool's `.m` file somewhere on your MATLAB path, then call it. Examples:
 % Name the current system's bus element signals and show propagated names
 nameBusElementSignals(gcs)
 
-% Load stimuli and link a config set before running
-quickSimEnv('myPlant', 'stimuli/drive_cycle.mat', 'simCfg')
+% New model + load stimuli + auto-link a config set from the base workspace
+quickSimEnv('drive_cycle.mat')
 ```
 
 See each file's header (`help nameBusElementSignals`, `help quickSimEnv`) for the
