@@ -20,7 +20,7 @@ and an example, so `help <functionName>` works after you copy it in.
 
 | Tool | File | What it does |
 |------|------|--------------|
-| Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names Bus Selector output / Bus Creator input signals after their top-level bus element and turns on propagated-signal display. Built for AUTOSAR-style models. |
+| Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names the signal on each In/Out Bus Element block after that block's `Element` and turns on propagated-signal display. Built for AUTOSAR-style models. |
 | Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, loads a data `.mat` you name into the base workspace, and auto-links the first config set found in the base workspace. |
 
 ## Usage

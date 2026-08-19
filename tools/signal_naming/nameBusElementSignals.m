@@ -1,21 +1,19 @@
 function report = nameBusElementSignals(sys, opts)
-%NAMEBUSELEMENTSIGNALS Name signals after their top-level bus element and show propagated names.
+%NAMEBUSELEMENTSIGNALS Name signals after the In/Out Bus Element block they connect to.
 %
-%   Built for AUTOSAR-style Simulink models where the outermost layer carries a
-%   root input bus (RPort) and a root output bus (PPort). Inside the model:
-%     * Bus Selector blocks break the input bus into element signals ("in-bus"),
-%     * Bus Creator blocks assemble element signals into the output bus ("out-bus").
-%
-%   This tool names those element signals after the bus element they carry and
-%   turns on propagated-signal display so the name flows downstream without
-%   having to label every hop by hand.
+%   Built for AUTOSAR-style Simulink models whose outermost layer uses the
+%   "In Bus Element" and "Out Bus Element" port blocks (the newer bus-element
+%   ports, not Bus Selector / Bus Creator). Each block already knows the bus
+%   element it maps to via its 'Element' parameter; this tool copies that name
+%   onto the connected signal line and turns on propagated-signal display so the
+%   name flows through the model without labelling every hop by hand.
 %
 %   REPORT = NAMEBUSELEMENTSIGNALS() operates on the current system (GCS).
 %   REPORT = NAMEBUSELEMENTSIGNALS(SYS) operates on SYS (name or handle).
 %   REPORT = NAMEBUSELEMENTSIGNALS(SYS, OPTS) with an options struct:
 %       .direction   'in' | 'out' | 'both'   (default 'both')
-%                    'in'  = name Bus Selector output signals (from in-bus).
-%                    'out' = name Bus Creator input signals (into out-bus).
+%                    'in'  = name the output line of each In Bus Element block.
+%                    'out' = name the input line of each Out Bus Element block.
 %       .overwrite   logical (default false)  overwrite lines that already
 %                    have a name; false only names unnamed lines.
 %       .propagate   logical (default true)   set ShowPropagatedSignals='on'
@@ -24,10 +22,9 @@ function report = nameBusElementSignals(sys, opts)
 %
 %   REPORT is a struct array of the signals touched: block, port, name, action.
 %
-%   Element names come from the block's own selection, so no Simulink.Bus object
-%   lookup is needed:
-%       * Bus Selector -> 'OutputSignals' (one entry per output port).
-%       * Bus Creator  -> the input line names, or the source-block names.
+%   In/Out Bus Element blocks are Inport/Outport blocks that carry an 'Element'
+%   parameter; the leaf of that element path (e.g. 'busA.sub.sig' -> 'sig') is
+%   used as the signal name. If 'Element' is empty the block's own name is used.
 %
 %   Copy this file anywhere on the MATLAB path and call it; it has no
 %   dependencies on other files in this repository.
@@ -48,16 +45,20 @@ function report = nameBusElementSignals(sys, opts)
     end
 
     if any(strcmp(opts.direction, {'in', 'both'}))
-        selectors = find_system(sys, findArgs{:}, 'BlockType', 'BusSelector');
-        for k = 1:numel(selectors)
-            report = local_nameSelectorOutputs(selectors(k), opts, report);
+        blocks = find_system(sys, findArgs{:}, 'BlockType', 'Inport');
+        for k = 1:numel(blocks)
+            if local_isBusElementPort(blocks(k))
+                report = local_nameOutgoing(blocks(k), opts, report);
+            end
         end
     end
 
     if any(strcmp(opts.direction, {'out', 'both'}))
-        creators = find_system(sys, findArgs{:}, 'BlockType', 'BusCreator');
-        for k = 1:numel(creators)
-            report = local_nameCreatorInputs(creators(k), opts, report);
+        blocks = find_system(sys, findArgs{:}, 'BlockType', 'Outport');
+        for k = 1:numel(blocks)
+            if local_isBusElementPort(blocks(k))
+                report = local_nameIncoming(blocks(k), opts, report);
+            end
         end
     end
 
@@ -81,32 +82,52 @@ function opts = local_defaults(opts)
 end
 
 % -------------------------------------------------------------------------
-function report = local_nameSelectorOutputs(blk, opts, report)
-    signals = local_splitList(get_param(blk, 'OutputSignals'));
-    ph = get_param(blk, 'PortHandles');
-    n = min(numel(signals), numel(ph.Outport));
-    for i = 1:n
-        name = local_leaf(signals{i});
-        report = local_applyToPort(ph.Outport(i), name, blk, opts, report);
-    end
+function tf = local_isBusElementPort(blk)
+    % In/Out Bus Element blocks are Inport/Outport blocks exposing an 'Element'
+    % parameter; plain Inport/Outport blocks do not.
+    op = get_param(blk, 'ObjectParameters');
+    tf = isfield(op, 'Element');
 end
 
 % -------------------------------------------------------------------------
-function report = local_nameCreatorInputs(blk, opts, report)
+function report = local_nameOutgoing(blk, opts, report)
+    % In Bus Element: name the single output line after the block's element.
+    name = local_elementName(blk);
     ph = get_param(blk, 'PortHandles');
-    for i = 1:numel(ph.Inport)
-        name = local_sourceSignalName(ph.Inport(i));
-        if isempty(name)
-            continue;   % nothing to derive a name from
-        end
-        % Name the driving line, and show propagation on the source port.
-        lh = get_param(ph.Inport(i), 'Line');
-        if lh == -1
-            continue;
-        end
-        src = get_param(lh, 'SrcPortHandle');
-        report = local_applyToPort(src, name, blk, opts, report);
+    if isempty(ph.Outport)
+        return;
     end
+    report = local_applyToPort(ph.Outport(1), name, blk, opts, report);
+end
+
+% -------------------------------------------------------------------------
+function report = local_nameIncoming(blk, opts, report)
+    % Out Bus Element: name the line driving its input after the block's element.
+    name = local_elementName(blk);
+    ph = get_param(blk, 'PortHandles');
+    if isempty(ph.Inport)
+        return;
+    end
+    lh = get_param(ph.Inport(1), 'Line');
+    if lh == -1
+        return;
+    end
+    src = get_param(lh, 'SrcPortHandle');
+    report = local_applyToPort(src, name, blk, opts, report);
+end
+
+% -------------------------------------------------------------------------
+function name = local_elementName(blk)
+    op = get_param(blk, 'ObjectParameters');
+    if isfield(op, 'Element')
+        name = get_param(blk, 'Element');
+    else
+        name = '';
+    end
+    if isempty(name)
+        name = get_param(blk, 'Name');   % fall back to the block name
+    end
+    name = local_leaf(name);
 end
 
 % -------------------------------------------------------------------------
@@ -134,36 +155,6 @@ function report = local_applyToPort(portHandle, name, blk, opts, report)
     end
     report(end + 1) = struct('block', getfullname(blk), ...
                              'port', portHandle, 'name', name, 'action', action); %#ok<AGROW>
-end
-
-% -------------------------------------------------------------------------
-function name = local_sourceSignalName(inPortHandle)
-    % Prefer an existing line name; otherwise fall back to the source block name.
-    name = '';
-    lh = get_param(inPortHandle, 'Line');
-    if lh == -1
-        return;
-    end
-    name = get_param(lh, 'Name');
-    if ~isempty(name)
-        return;
-    end
-    src = get_param(lh, 'SrcBlockHandle');
-    if src ~= -1
-        name = get_param(src, 'Name');
-    end
-end
-
-% -------------------------------------------------------------------------
-function items = local_splitList(str)
-    % Split a comma-separated signal list, respecting no nesting (Simulink
-    % flattens selected element paths to 'a.b.c' with commas between entries).
-    if isempty(str)
-        items = {};
-        return;
-    end
-    items = strtrim(strsplit(str, ','));
-    items = items(~cellfun(@isempty, items));
 end
 
 % -------------------------------------------------------------------------

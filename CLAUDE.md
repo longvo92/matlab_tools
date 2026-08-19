@@ -60,7 +60,9 @@ options change, update the file's `help` header **and** the tool table in
 
 ## Domain notes
 
-Models here are AUTOSAR-style: the outermost model layer carries a root **input
-bus** (RPort) broken up by Bus Selectors, and a root **output bus** (PPort)
-assembled by Bus Creators. Tools that name signals key off those top-level bus
-elements — "in-bus" = Bus Selector outputs, "out-bus" = Bus Creator inputs.
+Models here are AUTOSAR-style and use the **In Bus Element / Out Bus Element**
+port blocks (bus-element ports), not Bus Selector / Bus Creator. These are
+`Inport`/`Outport` blocks that carry an `Element` parameter naming the bus
+element they map to; tools key off that parameter. Detect them by the presence
+of the `Element` parameter (`isfield(get_param(blk,'ObjectParameters'),'Element')`),
+since a plain Inport/Outport lacks it.
