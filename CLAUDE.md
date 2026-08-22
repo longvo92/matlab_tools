@@ -63,6 +63,7 @@ options change, update the file's `help` header **and** the tool table in
 Models here are AUTOSAR-style and use the **In Bus Element / Out Bus Element**
 port blocks (bus-element ports), not Bus Selector / Bus Creator. These are
 `Inport`/`Outport` blocks that carry an `Element` parameter naming the bus
-element they map to; tools key off that parameter. Detect them by the presence
-of the `Element` parameter (`isfield(get_param(blk,'ObjectParameters'),'Element')`),
-since a plain Inport/Outport lacks it.
+element they map to; tools key off that parameter. Detect them with
+`strcmp(get_param(blk,'IsBusElementPort'),'on')` — a plain Inport/Outport
+still exposes the `Element` dialog parameter (just inactive), so checking
+`ObjectParameters` for `Element` alone gives false positives.
