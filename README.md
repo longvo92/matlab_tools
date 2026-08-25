@@ -21,7 +21,7 @@ and an example, so `help <functionName>` works after you copy it in.
 | Tool | File | What it does |
 |------|------|--------------|
 | Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names the signal on each In/Out Bus Element block after that block's `Element`, tracing upstream through From/Goto and subsystems to find the real source for Out Bus Elements, and turns on propagated-signal display. Built for AUTOSAR-style models. |
-| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, pushes any number of data files into the base workspace (`.mat` files loaded, `.m` files run as scripts), and auto-links the first config set found in the base workspace. Data files are optional and a bad one is skipped with a warning instead of aborting. |
+| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, pushes any number of data files into the base workspace (`.mat` files loaded, `.m` files run as scripts), and auto-links the first config set found in the base workspace.|
 
 ## Usage
 
