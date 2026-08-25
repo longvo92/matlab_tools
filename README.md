@@ -1,5 +1,7 @@
 # matlab_tools
 
+[![MATLAB lint](https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml/badge.svg)](https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml)
+
 Small, self-contained MATLAB / Simulink helper tools for day-to-day MBD work.
 
 Every tool is a single `.m` file (two at most) with **no cross-tool dependencies**.
@@ -37,6 +39,26 @@ quickSimEnv('drive_cycle.mat')
 
 See each file's header (`help nameBusElementSignals`, `help quickSimEnv`) for the
 full option list.
+
+## Continuous checks
+
+Every push and pull request runs [MISS_HIT](https://florianschanda.github.io/miss_hit/)
+over all `.m` files ([workflow](.github/workflows/matlab-lint.yml)). It is a
+pure-Python analyzer, so the checks need no MATLAB license.
+
+- **`mh_lint`** parses each file and flags likely bugs — a syntax error or a lint
+  finding fails the build.
+- **`mh_style`** and **`mh_metric`** report formatting and complexity as advisory
+  output; they never block a merge.
+
+Run the same checks locally before pushing:
+
+```bash
+pip install miss_hit
+mh_lint .      # gate: syntax + bug checks
+mh_style .     # advisory: formatting
+mh_metric .    # advisory: complexity
+```
 
 ## License
 
