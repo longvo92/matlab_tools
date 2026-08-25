@@ -37,13 +37,12 @@ jobs:
         run: mh_lint .
 
       # Advisory: formatting/style. Reported in the log, never blocks a merge.
+      # `|| true` keeps the step green so it does not raise a red annotation.
       - name: Style (advisory)
         if: always()
-        continue-on-error: true
-        run: mh_style .
+        run: mh_style . || true
 
       # Advisory: cyclomatic complexity and other code metrics.
       - name: Complexity metrics (advisory)
         if: always()
-        continue-on-error: true
-        run: mh_metric .
+        run: mh_metric . || true
