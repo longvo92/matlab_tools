@@ -1,34 +1,41 @@
 function [model, report] = quickSimEnv(varargin)
-%QUICKSIMENV Spin up a fresh model, load data files, and grab a config set from the workspace.
+%QUICKSIMENV Spin up a fresh model, load data files, link a data dictionary, and grab a config set.
 %
 %   Fast pre-run setup in one call:
 %     1. Creates a new empty model and opens it (like Ctrl+N).
 %     2. Pushes every data file you name into the base workspace: .mat files are
 %        loaded, .m files are run there as scripts.
-%     3. Scans the base workspace for a Simulink.ConfigSet and links it to the
+%     3. Links a Simulink data dictionary (.sldd) to the model if you name one.
+%     4. Scans the base workspace for a Simulink.ConfigSet and links it to the
 %        new model as the active configuration (a config reference, so the model
 %        stays in sync with the workspace variable).
 %
 %   MODEL = QUICKSIMENV
-%   MODEL = QUICKSIMENV(FILE1, FILE2, ...)
-%   MODEL = QUICKSIMENV({FILE1, FILE2, ...})
+%   MODEL = QUICKSIMENV(ITEM1, ITEM2, ...)
+%   MODEL = QUICKSIMENV({ITEM1, ITEM2, ...})
 %   [MODEL, REPORT] = QUICKSIMENV(...)
 %
-%       FILEn    name/path of a .mat or .m data file; files are processed in the
-%                order given. A name without extension is resolved as .mat first,
-%                then .m. Pass no file at all to only create the model and link
-%                the config.
+%       ITEMn    each argument is one of:
+%                  * a .mat or .m data file, pushed into the base workspace;
+%                  * a .sldd file, linked to the model as its data dictionary;
+%                  * the literal word 'sldd', which links the first .sldd found in
+%                    the open Simulink project (or, with no project, the current
+%                    folder tree).
+%                A data-file name without extension is resolved as .mat then .m.
+%                Data files load in the order given. Pass no argument at all to
+%                only create the model and link the config.
 %       MODEL    name of the new model.
 %       REPORT   struct describing what happened:
 %                  .model    model name
 %                  .loaded   struct array (name, type, vars) of files that loaded
 %                  .skipped  struct array (name, reason) of files that did not
+%                  .sldd     data dictionary linked, '' if none
 %                  .config   base workspace config variable linked, '' if none
 %
-%   No data file is required and none is fatal: a file that is missing, has an
-%   unsupported extension, or errors while loading is reported as skipped with a
-%   warning, the remaining files still load, and the model and config work is
-%   still done.
+%   Nothing is mandatory and nothing is fatal: a data file or dictionary that is
+%   missing, has an unsupported extension, or errors is reported as skipped with a
+%   warning, the rest still load, and the model and config work is still done. A
+%   model links a single dictionary; if several are named the first wins.
 %
 %   The config set is found automatically: the first base workspace variable of
 %   class Simulink.ConfigSet (or Simulink.ConfigSetRef) is used. If none exists,
@@ -37,13 +44,16 @@ function [model, report] = quickSimEnv(varargin)
 %   Examples:
 %       quickSimEnv('drive_cycle.mat')
 %       quickSimEnv('drive_cycle.mat', 'calib_params.m', 'bus_defs.mat')
+%       quickSimEnv('drive_cycle.mat', 'projData.sldd')
+%       quickSimEnv('drive_cycle.mat', 'sldd')   % auto-find the project dictionary
 %       quickSimEnv({'drive_cycle.mat', 'calib_params.m'})
-%       quickSimEnv                     % new model + config, no data
+%       quickSimEnv                              % new model + config, no data
 %
 %   Copy this file anywhere on the MATLAB path and call it; it has no
 %   dependencies on other files in this repository.
 
-    files = local_fileList(varargin);
+    items = local_fileList(varargin);
+    [dataFiles, slddReqs] = local_classify(items);
 
     model = local_newModel();
     open_system(model);
@@ -51,27 +61,44 @@ function [model, report] = quickSimEnv(varargin)
     report = struct('model', model, ...
                     'loaded',  struct('name', {}, 'type', {}, 'vars', {}), ...
                     'skipped', struct('name', {}, 'reason', {}), ...
+                    'sldd', '', ...
                     'config', '');
 
-    for i = 1:numel(files)
-        [ok, kind, vars, reason] = local_loadOne(files{i});
+    for i = 1:numel(dataFiles)
+        [ok, kind, vars, reason] = local_loadOne(dataFiles{i});
         if ok
-            report.loaded(end+1) = struct('name', files{i}, 'type', kind, 'vars', {vars});
+            report.loaded(end+1) = struct('name', dataFiles{i}, 'type', kind, 'vars', {vars});
             fprintf('Loaded %d variable(s) from %s into base workspace.\n', ...
-                    numel(vars), files{i});
+                    numel(vars), dataFiles{i});
         else
-            report.skipped(end+1) = struct('name', files{i}, 'reason', reason);
-            warning('quickSimEnv:skipped', 'Skipped %s: %s', files{i}, reason);
+            report.skipped(end+1) = struct('name', dataFiles{i}, 'reason', reason);
+            warning('quickSimEnv:skipped', 'Skipped %s: %s', dataFiles{i}, reason);
         end
     end
 
+    report.sldd = local_linkSldd(model, slddReqs);
     report.config = local_attachWorkspaceConfig(model);
 
     if nargout == 0
-        fprintf('%s: %d file(s) loaded, %d skipped, config %s.\n', ...
+        fprintf('%s: %d file(s) loaded, %d skipped, dictionary %s, config %s.\n', ...
                 model, numel(report.loaded), numel(report.skipped), ...
-                local_configText(report.config));
+                local_nameText(report.sldd, 'none'), local_nameText(report.config, 'default'));
         clear model report;
+    end
+end
+
+% -------------------------------------------------------------------------
+function [dataFiles, slddReqs] = local_classify(items)
+    % Split the flat item list into data files and data-dictionary requests.
+    dataFiles = {};
+    slddReqs = {};
+    for i = 1:numel(items)
+        [~, base, ext] = fileparts(items{i});
+        if strcmpi(ext, '.sldd') || (isempty(ext) && strcmpi(base, 'sldd'))
+            slddReqs{end+1} = items{i}; %#ok<AGROW>
+        else
+            dataFiles{end+1} = items{i}; %#ok<AGROW>
+        end
     end
 end
 
@@ -197,6 +224,82 @@ function s = local_quote(s)
 end
 
 % -------------------------------------------------------------------------
+function linked = local_linkSldd(model, reqs)
+    % Link one .sldd data dictionary to the model. A model holds a single
+    % dictionary, so if several are requested the first that resolves wins.
+    linked = '';
+    if isempty(reqs)
+        return;
+    end
+
+    dictPath = '';
+    for i = 1:numel(reqs)
+        p = local_resolveSldd(reqs{i});
+        if isempty(p)
+            warning('quickSimEnv:noSldd', 'Data dictionary not found for ''%s''.', reqs{i});
+        elseif isempty(dictPath)
+            dictPath = p;
+        else
+            warning('quickSimEnv:manySldd', ...
+                    'A model links one data dictionary; ignoring extra ''%s''.', reqs{i});
+        end
+    end
+    if isempty(dictPath)
+        return;
+    end
+
+    [~, n, e] = fileparts(dictPath);
+    dd = [n e];   % DataDictionary takes the file name; it is resolved via the path
+    try
+        set_param(model, 'DataDictionary', dd);
+        linked = dd;
+        fprintf('Linked data dictionary ''%s'' to %s.\n', dd, model);
+    catch err
+        warning('quickSimEnv:slddLink', 'Could not link ''%s'': %s', dd, err.message);
+    end
+end
+
+% -------------------------------------------------------------------------
+function p = local_resolveSldd(req)
+    % Resolve a dictionary request to a .sldd path: the literal 'sldd' auto-finds
+    % the project dictionary, anything else is treated as a .sldd file name.
+    [~, base, ext] = fileparts(req);
+    if isempty(ext) && strcmpi(base, 'sldd')
+        p = local_findFirstSldd();
+        return;
+    end
+    if isempty(ext)
+        req = [req '.sldd'];
+    end
+    p = local_fullPath(req);
+end
+
+% -------------------------------------------------------------------------
+function p = local_findFirstSldd()
+    % First .sldd in the open Simulink project, else in the current folder tree.
+    p = '';
+    try
+        proj = matlab.project.rootProject;   % [] when no project is open
+    catch
+        proj = [];
+    end
+    if ~isempty(proj)
+        files = proj.Files;
+        for i = 1:numel(files)
+            [~, ~, e] = fileparts(files(i).Path);
+            if strcmpi(e, '.sldd')
+                p = files(i).Path;
+                return;
+            end
+        end
+    end
+    d = dir(fullfile(pwd, '**', '*.sldd'));
+    if ~isempty(d)
+        p = fullfile(d(1).folder, d(1).name);
+    end
+end
+
+% -------------------------------------------------------------------------
 function varName = local_attachWorkspaceConfig(model)
     varName = local_findConfigVar();
     if isempty(varName)
@@ -231,10 +334,10 @@ function varName = local_findConfigVar()
 end
 
 % -------------------------------------------------------------------------
-function txt = local_configText(varName)
-    if isempty(varName)
-        txt = 'default';
+function txt = local_nameText(name, emptyWord)
+    if isempty(name)
+        txt = emptyWord;
     else
-        txt = sprintf('''%s''', varName);
+        txt = sprintf('''%s''', name);
     end
 end
