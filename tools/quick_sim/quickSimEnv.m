@@ -56,7 +56,13 @@ function [model, report] = quickSimEnv(varargin)
     [dataFiles, slddReqs] = local_classify(items);
 
     model = local_newModel();
-    open_system(model);
+    try
+        open_system(model);
+    catch err
+        % A display problem must not sink the rest of the setup; the model is
+        % already created and every later step works on it unopened.
+        warning('quickSimEnv:open', 'Could not open %s: %s', model, err.message);
+    end
 
     report = struct('model', model, ...
                     'loaded',  struct('name', {}, 'type', {}, 'vars', {}), ...
@@ -117,8 +123,9 @@ function files = local_fileList(args)
         elseif iscell(a)
             files = [files, local_fileList(a)]; %#ok<AGROW>
         else
-            error('quickSimEnv:badArg', ...
-                  'File names must be char, string, or cell arrays of those.');
+            warning('quickSimEnv:badArg', ...
+                    'Ignoring an argument of class %s; expected char, string, or cell.', ...
+                    class(a));
         end
     end
 end
@@ -280,18 +287,18 @@ function p = local_findFirstSldd()
     p = '';
     try
         proj = matlab.project.rootProject;   % [] when no project is open
-    catch
-        proj = [];
-    end
-    if ~isempty(proj)
-        files = proj.Files;
-        for i = 1:numel(files)
-            [~, ~, e] = fileparts(files(i).Path);
-            if strcmpi(e, '.sldd')
-                p = files(i).Path;
-                return;
+        if ~isempty(proj)
+            files = proj.Files;
+            for i = 1:numel(files)
+                [~, ~, e] = fileparts(files(i).Path);
+                if strcmpi(e, '.sldd')
+                    p = files(i).Path;
+                    return;
+                end
             end
         end
+    catch
+        % Project API unavailable or unhappy; fall through to a folder search.
     end
     d = dir(fullfile(pwd, '**', '*.sldd'));
     if ~isempty(d)
@@ -300,7 +307,8 @@ function p = local_findFirstSldd()
 end
 
 % -------------------------------------------------------------------------
-function varName = local_attachWorkspaceConfig(model)
+function linked = local_attachWorkspaceConfig(model)
+    linked = '';
     varName = local_findConfigVar();
     if isempty(varName)
         fprintf('No Simulink.ConfigSet found in base workspace; using default config.\n');
@@ -308,16 +316,23 @@ function varName = local_attachWorkspaceConfig(model)
     end
 
     refName = 'CfgRef';
-    csr = Simulink.ConfigSetRef;
-    csr.Name = refName;
-    csr.SourceName = varName;   % live link to the base workspace variable
+    try
+        csr = Simulink.ConfigSetRef;
+        csr.Name = refName;
+        csr.SourceName = varName;   % live link to the base workspace variable
 
-    if ~isempty(getConfigSet(model, refName))
-        detachConfigSet(model, refName);
+        if ~isempty(getConfigSet(model, refName))
+            detachConfigSet(model, refName);
+        end
+        attachConfigSet(model, csr, true);
+        setActiveConfigSet(model, refName);
+        linked = varName;
+        fprintf('Linked config ''%s'' from base workspace to %s.\n', varName, model);
+    catch err
+        % Leave the model on its default config rather than aborting the setup.
+        warning('quickSimEnv:configLink', ...
+                'Could not link config ''%s'': %s', varName, err.message);
     end
-    attachConfigSet(model, csr, true);
-    setActiveConfigSet(model, refName);
-    fprintf('Linked config ''%s'' from base workspace to %s.\n', varName, model);
 end
 
 % -------------------------------------------------------------------------
