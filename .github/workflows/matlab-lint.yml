@@ -1,0 +1,49 @@
+name: MATLAB lint
+
+# Static checks for every .m file in the repo. Uses MISS_HIT
+# (https://florianschanda.github.io/miss_hit/), a pure-Python MATLAB/Octave
+# code analyzer, so no MATLAB license or self-hosted runner is needed.
+
+on:
+  push:
+    paths:
+      - '**/*.m'
+      - miss_hit.cfg
+      - .github/workflows/matlab-lint.yml
+  pull_request:
+    paths:
+      - '**/*.m'
+      - miss_hit.cfg
+      - .github/workflows/matlab-lint.yml
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Unpinned to track fixes; pin a version here if a release ever regresses.
+      - name: Install MISS_HIT
+        run: pip install miss_hit
+
+      # Gate: parses every .m file and reports likely bugs. A syntax error or a
+      # lint finding makes this step exit non-zero and fails the build.
+      - name: Lint (syntax + bug checks)
+        run: mh_lint .
+
+      # Advisory: formatting/style. Reported in the log, never blocks a merge.
+      - name: Style (advisory)
+        if: always()
+        continue-on-error: true
+        run: mh_style .
+
+      # Advisory: cyclomatic complexity and other code metrics.
+      - name: Complexity metrics (advisory)
+        if: always()
+        continue-on-error: true
+        run: mh_metric .
