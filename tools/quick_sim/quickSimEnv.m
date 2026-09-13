@@ -3,8 +3,8 @@ function [model, report] = quickSimEnv(varargin)
 %
 %   Fast pre-run setup in one call:
 %     1. Creates a new empty model and opens it (like Ctrl+N).
-%     2. Pushes every data file you name into the base workspace: .mat files are
-%        loaded, .m files are run there as scripts.
+%     2. Loads every data file you name: .mat files go straight into the new
+%        model's workspace, .m files are run as scripts in the base workspace.
 %     3. Links a Simulink data dictionary (.sldd) to the model if you name one.
 %     4. Scans the base workspace for a Simulink.ConfigSet and links it to the
 %        new model as the active configuration (a config reference, so the model
@@ -16,7 +16,8 @@ function [model, report] = quickSimEnv(varargin)
 %   [MODEL, REPORT] = QUICKSIMENV(...)
 %
 %       ITEMn    each argument is one of:
-%                  * a .mat or .m data file, pushed into the base workspace;
+%                  * a .mat file, copied into the new model's workspace;
+%                  * a .m script, run in the base workspace;
 %                  * a .sldd file, linked to the model as its data dictionary;
 %                  * the literal word 'sldd', which links the first .sldd found in
 %                    the open Simulink project (or, with no project, the current
@@ -27,10 +28,26 @@ function [model, report] = quickSimEnv(varargin)
 %       MODEL    name of the new model.
 %       REPORT   struct describing what happened:
 %                  .model    model name
-%                  .loaded   struct array (name, type, vars) of files that loaded
+%                  .loaded   struct array (name, type, modelVars, baseVars) of files
+%                            that loaded; modelVars and baseVars list the variables
+%                            that went to the model workspace and the base workspace
 %                  .skipped  struct array (name, reason) of files that did not
 %                  .sldd     data dictionary linked, '' if none
 %                  .config   base workspace config variable linked, '' if none
+%
+%   Where .mat variables go:
+%     Variables from a .mat file are copied into the model workspace. They stay
+%     out of the base workspace, only this model sees them, and saving the model
+%     saves them inside the model file. A model workspace cannot store some kinds
+%     of object, so these go to the base workspace instead:
+%       * Simulink.Bus, Simulink.ConnectionBus, Simulink.AliasType,
+%         Simulink.ValueType, Simulink.Variant (Simulink.VariantExpression)
+%       * Simulink.NumericType with IsAlias set to true
+%       * Simulink.Signal and its subclasses (AUTOSAR.Signal, ...) whose storage
+%         class is not Auto
+%       * Simulink.ConfigSet and Simulink.ConfigSetRef, so that step 4 finds them
+%     A .m script runs in the base workspace, so it cannot read variables that an
+%     earlier .mat file put in the model workspace.
 %
 %   Nothing is mandatory and nothing is fatal: a data file or dictionary that is
 %   missing, has an unsupported extension, or errors is reported as skipped with a
@@ -65,17 +82,18 @@ function [model, report] = quickSimEnv(varargin)
     end
 
     report = struct('model', model, ...
-                    'loaded',  struct('name', {}, 'type', {}, 'vars', {}), ...
+                    'loaded',  struct('name', {}, 'type', {}, 'modelVars', {}, 'baseVars', {}), ...
                     'skipped', struct('name', {}, 'reason', {}), ...
                     'sldd', '', ...
                     'config', '');
 
     for i = 1:numel(dataFiles)
-        [ok, kind, vars, reason] = local_loadOne(dataFiles{i});
+        [ok, kind, modelVars, baseVars, reason] = local_loadOne(dataFiles{i}, model);
         if ok
-            report.loaded(end+1) = struct('name', dataFiles{i}, 'type', kind, 'vars', {vars});
-            fprintf('Loaded %d variable(s) from %s into base workspace.\n', ...
-                    numel(vars), dataFiles{i});
+            entry = struct('name', dataFiles{i}, 'type', kind, ...
+                           'modelVars', {modelVars}, 'baseVars', {baseVars});
+            report.loaded(end+1) = entry;
+            local_printLoaded(entry, model);
         else
             report.skipped(end+1) = struct('name', dataFiles{i}, 'reason', reason);
             warning('quickSimEnv:skipped', 'Skipped %s: %s', dataFiles{i}, reason);
@@ -144,10 +162,11 @@ function name = local_newModel()
 end
 
 % -------------------------------------------------------------------------
-function [ok, kind, vars, reason] = local_loadOne(fileName)
+function [ok, kind, modelVars, baseVars, reason] = local_loadOne(fileName, model)
     ok = false;
     kind = '';
-    vars = {};
+    modelVars = {};
+    baseVars = {};
     reason = '';
 
     [~, ~, ext] = fileparts(fileName);
@@ -162,24 +181,80 @@ function [ok, kind, vars, reason] = local_loadOne(fileName)
         return;
     end
 
-    before = evalin('base', 'who');
     try
         if strcmp(kind, 'mat')
-            vars = who('-file', fullPath);   % names without pulling the data twice
-            evalin('base', sprintf('load(''%s'');', local_quote(fullPath)));
+            [modelVars, baseVars] = local_loadMat(fullPath, model);
         else
             % Run in the base workspace so the script's variables land there.
+            before = evalin('base', 'who');
             evalin('base', sprintf('run(''%s'');', local_quote(fullPath)));
-            vars = setdiff(evalin('base', 'who'), before);
+            baseVars = setdiff(evalin('base', 'who'), before);
         end
     catch err
         kind = '';
-        vars = {};
+        modelVars = {};
+        baseVars = {};
         reason = err.message;
         return;
     end
-    vars = reshape(vars, 1, []);
+    modelVars = reshape(modelVars, 1, []);
+    baseVars = reshape(baseVars, 1, []);
     ok = true;
+end
+
+% -------------------------------------------------------------------------
+function [modelVars, baseVars] = local_loadMat(fullPath, model)
+    % Copy a .mat file's variables into the model workspace, except the objects
+    % a model workspace cannot store; those go to the base workspace.
+    data = load(fullPath, '-mat');
+    names = fieldnames(data);
+    values = struct2cell(data);
+    toBase = cellfun(@local_needsBaseWorkspace, values);
+
+    mws = get_param(model, 'ModelWorkspace');
+    for k = 1:numel(names)
+        if toBase(k)
+            assignin('base', names{k}, values{k});
+        else
+            assignin(mws, names{k}, values{k});
+        end
+    end
+    modelVars = names(~toBase);
+    baseVars = names(toBase);
+end
+
+% -------------------------------------------------------------------------
+function tf = local_needsBaseWorkspace(value)
+    % Simulink only resolves these from the base workspace or a data dictionary.
+    % Config sets are on the list because a config reference cannot point into a
+    % model workspace, and the config-link step searches the base workspace.
+    if isa(value, 'Simulink.NumericType')
+        tf = value.IsAlias;
+    elseif isa(value, 'Simulink.Signal')
+        tf = ~strcmp(value.CoderInfo.StorageClass, 'Auto');
+    else
+        baseOnly = {'Simulink.Bus', 'Simulink.ConnectionBus', 'Simulink.AliasType', ...
+                    'Simulink.ValueType', 'Simulink.Variant', 'Simulink.VariantExpression', ...
+                    'Simulink.ConfigSet', 'Simulink.ConfigSetRef'};
+        tf = any(cellfun(@(c) isa(value, c), baseOnly));
+    end
+end
+
+% -------------------------------------------------------------------------
+function local_printLoaded(entry, model)
+    if ~strcmp(entry.type, 'mat')
+        fprintf('Loaded %d variable(s) from %s into base workspace.\n', ...
+                numel(entry.baseVars), entry.name);
+        return;
+    end
+    if ~isempty(entry.modelVars) || isempty(entry.baseVars)
+        fprintf('Loaded %d variable(s) from %s into %s model workspace.\n', ...
+                numel(entry.modelVars), entry.name, model);
+    end
+    if ~isempty(entry.baseVars)
+        fprintf('Loaded %d variable(s) from %s into base workspace (a model workspace cannot store them).\n', ...
+                numel(entry.baseVars), entry.name);
+    end
 end
 
 % -------------------------------------------------------------------------
