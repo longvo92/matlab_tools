@@ -23,7 +23,7 @@ and an example, so `help <functionName>` works after you copy it in.
 | Tool | File | What it does |
 |------|------|--------------|
 | Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names the signal on each In/Out Bus Element block after that block's `Element`, tracing upstream through From/Goto and subsystems to find the real source for Out Bus Elements, and turns on propagated-signal display. Built for AUTOSAR-style models. |
-| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, pushes any number of data files into the base workspace (`.mat` files loaded, `.m` files run as scripts), optionally links a `.sldd` data dictionary (name it, or pass `'sldd'` to auto-find the project's), and auto-links the first config set found in the base workspace.|
+| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, copies any number of `.mat` files straight into its model workspace (objects a model workspace cannot store, such as bus objects and config sets, go to the base workspace), runs `.m` scripts in the base workspace, optionally links a `.sldd` data dictionary (name it, or pass `'sldd'` to auto-find the project's), and auto-links the first config set found in the base workspace. |
 
 ## Usage
 
@@ -33,10 +33,12 @@ Copy a tool's `.m` file somewhere on your MATLAB path, then call it. Examples:
 % Name the current system's bus element signals and show propagated names
 nameBusElementSignals(gcs)
 
-% New model + load stimuli + auto-link a config set from the base workspace
+% New model + load stimuli into its model workspace + auto-link a config set
 quickSimEnv('drive_cycle.mat')
 
-% Several data files at once, .mat and .m mixed, loaded in the order given
+% Several data files at once, loaded in the order given: .mat files into the
+% model workspace (bus objects and config sets into the base workspace),
+% .m scripts run in the base workspace
 quickSimEnv('drive_cycle.mat', 'calib_params.m', 'bus_defs.mat')
 
 % Data + link a data dictionary; 'sldd' auto-finds the project's dictionary
