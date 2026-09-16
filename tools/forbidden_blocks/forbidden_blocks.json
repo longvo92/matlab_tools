@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "settings": {
+    "followLinks": true,
+    "lookUnderMasks": "all",
+    "checkReferencedModels": true,
+    "failOnWarning": false,
+    "verbose": false
+  },
+  "rules": [
+    {
+      "id": "BLK001",
+      "enabled": true,
+      "severity": "ERROR",
+      "match": {
+        "BlockType": "ToWorkspace"
+      },
+      "message": "To Workspace block is not allowed for production code generation."
+    },
+    {
+      "id": "BLK002",
+      "enabled": true,
+      "severity": "ERROR",
+      "match": {
+        "BlockType": "FromWorkspace"
+      },
+      "message": "From Workspace block is not allowed for production code generation."
+    },
+    {
+      "id": "BLK003",
+      "enabled": true,
+      "severity": "WARNING",
+      "match": {
+        "BlockType": "Scope"
+      },
+      "message": "Scope block should be removed from production models."
+    },
+    {
+      "id": "BLK004",
+      "enabled": true,
+      "severity": "ERROR",
+      "match": {
+        "BlockType": "Rounding"
+      },
+      "message": "Rounding Function is prohibited due to incorrect generated-code behavior."
+    },
+    {
+      "id": "BLK006",
+      "enabled": true,
+      "severity": "ERROR",
+      "match": {
+        "BlockType": "Lookup_n-D"
+      },
+      "message": "n-D Lookup Table is not supported for AUTOSAR code generation."
+    }
+  ]
+}

@@ -23,6 +23,7 @@ and an example, so `help <functionName>` works after you copy it in.
 | Tool | File | What it does |
 |------|------|--------------|
 | Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names the signal on each In/Out Bus Element block after that block's `Element`, tracing upstream through From/Goto and subsystems to find the real source for Out Bus Elements, and turns on propagated-signal display. Built for AUTOSAR-style models. |
+| Forbidden block checker | [`tools/forbidden_blocks/checkForbiddenBlocks.m`](tools/forbidden_blocks/checkForbiddenBlocks.m) | Checks a model and its referenced models against configurable JSON rules before code generation. Commented blocks and blocks whose outputs connect only to Terminators are reported as warnings; active violations stop the pipeline. Copy the adjacent `forbidden_blocks.json` with the tool. |
 | Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, copies any number of `.mat` files straight into its model workspace (objects a model workspace cannot store, such as bus objects and config sets, go to the base workspace), runs `.m` scripts in the base workspace, optionally links a `.sldd` data dictionary (name it, or pass `'sldd'` to auto-find the project's), and auto-links the first config set found in the base workspace. |
 
 ## Usage
@@ -32,6 +33,9 @@ Copy a tool's `.m` file somewhere on your MATLAB path, then call it. Examples:
 ```matlab
 % Name the current system's bus element signals and show propagated names
 nameBusElementSignals(gcs)
+
+% Stop immediately when the model contains an active forbidden block
+checkForbiddenBlocks('EVCC_ChargeCtrl')
 
 % New model + load stimuli into its model workspace + auto-link a config set
 quickSimEnv('drive_cycle.mat')
@@ -49,8 +53,8 @@ quickSimEnv('drive_cycle.mat', 'sldd')
 quickSimEnv
 ```
 
-See each file's header (`help nameBusElementSignals`, `help quickSimEnv`) for the
-full option list.
+See each file's header (`help nameBusElementSignals`, `help checkForbiddenBlocks`,
+`help quickSimEnv`) for the full option list.
 
 ## Continuous checks
 
