@@ -1,0 +1,445 @@
+function fig = interface_tools_gui(opts)
+%INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
+% Version: 1.5.0 (Interface tools bundle).
+%   interface_tools_gui
+%   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
+%
+% Defaults are read from interface_tools_config.json beside this file.
+% SourceXlsx is relative to the config folder; output paths are relative to
+% ProjectRoot (or absolute). Empty ProjectRoot enables project discovery.
+% Sheets affect SLDD only; parameter generation always processes ALL sheets.
+% Preview lists every ADD/REMOVE/PROPERTY_DIFF as bus.element in a table.
+% Existing property differences are reported only, never applied.
+%
+% Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
+% SLDD operations additionally require the project's sldd2excel_main exporter
+% on the MATLAB path or beside ExportXlsx. No other repository helpers needed.
+
+    if nargin < 1, opts = struct(); end
+    validateattributes(opts, {'struct'}, {'scalar'});
+    toolFolder = fileparts(mfilename('fullpath'));
+    configFile = fullfile(toolFolder, 'interface_tools_config.json');
+    if isfield(opts, 'ConfigFile'), configFile = char(opts.ConfigFile); end
+    config = local_readConfig(configFile);
+    addpath(toolFolder);
+
+    projectRoot = '';
+    slddFile = '';
+    parametersFile = '';
+    exportedFile = '';
+    knownSheets = strings(1, 0);
+    logLines = {'Ready. Choose an Excel workbook.'};
+
+    fig = uifigure('Name', 'CVC Interface Tools', ...
+        'Position', [180 80 980 760], 'Color', [0.97 0.98 0.99]);
+    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 224, 20, '1x', 90}, ...
+        'Padding', [16 12 16 12], 'RowSpacing', 8);
+    uilabel(layout, 'Text', 'CVC Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
+    sourceGrid = uigridlayout(layout, [2 3], 'RowHeight', {30, 22}, ...
+        'ColumnWidth', {90, '1x', 90}, 'Padding', [0 0 0 0]);
+    uilabel(sourceGrid, 'Text', 'Source XLSX', 'FontWeight', 'bold');
+    excelEdit = uieditfield(sourceGrid, 'text', 'Tag', 'SourceXlsx', ...
+        'Placeholder', 'Select the Excel interface file...', ...
+        'ValueChangedFcn', @(~, ~) loadExcel());
+    browseButton = uibutton(sourceGrid, 'push', 'Text', 'Browse...', ...
+        'ButtonPushedFcn', @(~, ~) browseExcel());
+    uilabel(sourceGrid, 'Text', 'Project', 'FontWeight', 'bold');
+    projectLabel = uilabel(sourceGrid, 'Text', 'Automatic project discovery', ...
+        'Interpreter', 'none');
+    projectLabel.Layout.Column = [2 3];
+
+    sections = uigridlayout(layout, [1 2], 'ColumnWidth', {'1x', '1.4x'}, ...
+        'Padding', [0 0 0 0], 'ColumnSpacing', 12);
+    parameterPanel = uipanel(sections, 'Title', 'Parameter M-file', 'FontWeight', 'bold');
+    pg = uigridlayout(parameterPanel, [5 1], ...
+        'RowHeight', {20, 44, 24, 32, '1x'}, 'Padding', [12 10 12 10]);
+    uilabel(pg, 'Text', 'Output file', 'FontWeight', 'bold');
+    parametersLabel = uilabel(pg, 'Text', config.ParametersFile, ...
+        'WordWrap', 'on', 'Interpreter', 'none');
+    uilabel(pg, 'Text', 'Always processes ALL parameter sheets.');
+    parameterButton = uibutton(pg, 'push', ...
+        'Text', 'Generate Parameters', 'Tag', 'GenerateParameters', ...
+        'ButtonPushedFcn', @(~, ~) runTasks('parameters'));
+
+    slddPanel = uipanel(sections, 'Title', 'SLDD interfaces', 'FontWeight', 'bold');
+    sg = uigridlayout(slddPanel, [4 2], ...
+        'RowHeight', {36, 22, '1x', 32}, 'ColumnWidth', {'1x', '1x'}, ...
+        'Padding', [12 8 12 8], 'RowSpacing', 4);
+    slddLabel = uilabel(sg, 'Text', config.SlddFile, ...
+        'WordWrap', 'on', 'Interpreter', 'none');
+    slddLabel.Layout.Column = [1 2];
+    sheetCountLabel = uilabel(sg, 'Text', 'Models / sheets: no workbook loaded');
+    sheetCountLabel.Layout.Column = [1 2];
+    sheetList = uilistbox(sg, 'Tag', 'SyncSheets', ...
+        'Items', {}, 'Value', {}, 'Multiselect', 'on', ...
+        'ValueChangedFcn', @(~, ~) updateSelectionCount());
+    selectionGrid = uigridlayout(sg, [2 1], 'RowHeight', {28, 28}, 'Padding', [0 0 0 0]);
+    selectButton = uibutton(selectionGrid, 'Text', 'Select all', ...
+        'ButtonPushedFcn', @(~, ~) selectAllSheets());
+    clearButton = uibutton(selectionGrid, 'Text', 'Clear selection', ...
+        'ButtonPushedFcn', @(~, ~) clearSheets());
+    previewButton = uibutton(sg, 'push', 'Text', 'Preview differences', 'Tag', 'PreviewSldd', ...
+        'ButtonPushedFcn', @(~, ~) runTasks('preview'));
+    syncButton = uibutton(sg, 'push', 'Text', 'Sync SLDD (Add / Remove)', 'Tag', 'SyncSldd', ...
+        'ButtonPushedFcn', @(~, ~) runTasks('sync'));
+    actionButtons = [previewButton, syncButton, parameterButton];
+    inputControls = [excelEdit, browseButton, sheetList, selectButton, clearButton];
+
+    detailLabel = uilabel(layout, 'Text', 'SLDD differences: run Preview to compare.', ...
+        'FontWeight', 'bold');
+    detailTable = uitable(layout, 'Tag', 'InterfaceDifferences', ...
+        'Data', cell(0, 5), 'ColumnName', {'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
+        'ColumnWidth', {130, 220, 100, 'auto', 'auto'}, 'RowName', {}, ...
+        'ColumnEditable', false);
+    logArea = uitextarea(layout, 'Editable', 'off', 'Value', logLines);
+    if ~isempty(config.SourceXlsx)
+        excelEdit.Value = config.SourceXlsx;
+        loadExcel();
+    end
+
+    % ------------------------------------------------------------
+    % Select source XLSX / discover project
+    % ------------------------------------------------------------
+    function browseExcel()
+        [filename, folder] = uigetfile( ...
+            {'*.xlsx;*.xlsm', 'Excel workbooks (*.xlsx, *.xlsm)'}, ...
+            'Select interface XLSX');
+        if isequal(filename, 0), return; end
+        excelEdit.Value = fullfile(folder, filename);
+        loadExcel();
+    end
+
+    function loadExcel()
+        source = strtrim(excelEdit.Value);
+        projectRoot = '';
+        slddFile = '';
+        parametersFile = '';
+        exportedFile = '';
+        knownSheets = strings(1, 0);
+        sheetList.Items = {};
+        sheetList.Value = {};
+        projectLabel.Text = 'Automatic project discovery';
+        slddLabel.Text = config.SlddFile;
+        parametersLabel.Text = config.ParametersFile;
+        detailTable.Data = cell(0, 5);
+        detailLabel.Text = 'SLDD differences: run Preview to compare.';
+        sheetCountLabel.Text = 'No sheets loaded';
+        if isempty(source), return; end
+        if ~isfile(source)
+            appendLog('XLSX file does not exist: ' + string(source));
+            return;
+        end
+
+        % Normalize relative XLSX paths before Sync temporarily changes pwd.
+        [resolved, info] = fileattrib(source);
+        if resolved
+            source = info.Name;
+            excelEdit.Value = source;
+        end
+
+        try
+            if isempty(config.ProjectRoot)
+                projectRoot = findProjectRoot(source, toolFolder, config);
+            else
+                projectRoot = config.ProjectRoot;
+                if ~isfolder(projectRoot)
+                    error('Configured ProjectRoot does not exist: %s', projectRoot);
+                end
+            end
+            parametersFile = local_resolvePath(config.ParametersFile, projectRoot);
+            exportedFile = local_resolvePath(config.ExportXlsx, projectRoot);
+            slddFile = findProjectSldd(projectRoot, config.SlddFile);
+
+            projectLabel.Text = projectRoot;
+            if isempty(slddFile)
+                slddLabel.Text = ['NOT FOUND: ' config.SlddFile];
+                slddLabel.FontColor = [0.75 0.20 0.18];
+                appendLog('SLDD not found/ambiguous. Parameter generation is still available.');
+            else
+                slddLabel.Text = slddFile;
+                slddLabel.FontColor = [0.37 0.40 0.45];
+            end
+            projectLabel.Tooltip = projectRoot;
+            slddLabel.Tooltip = local_resolvePath(config.SlddFile, projectRoot);
+            parametersLabel.Text = parametersFile;
+            parametersLabel.Tooltip = parametersFile;
+            appendLog('Project: ' + string(projectRoot));
+
+            sheets = string(sheetnames(source));
+            for k = 1:numel(sheets)
+                try
+                    header = readcell(source, 'Sheet', char(sheets(k)), ...
+                        'Range', 'A1:AZ40');
+                    if isInterfaceSheet(header)
+                        knownSheets(end+1) = sheets(k); %#ok<AGROW>
+                    end
+                catch ME
+                    appendLog(sprintf('Ignoring sheet %s: %s', sheets(k), ME.message));
+                end
+            end
+            sheetList.Items = cellstr(knownSheets);
+            sheetList.Value = sheetList.Items;
+            updateSelectionCount();
+            appendLog(sprintf('Loaded %d interface sheet(s). Generate processes ALL sheets.', ...
+                numel(knownSheets)));
+        catch ME
+            appendLog('Error loading XLSX/project: ' + string(ME.message));
+            uialert(fig, ME.message, 'Failed to load XLSX', 'Icon', 'error');
+        end
+    end
+
+    function tf = isInterfaceSheet(cells)
+        tf = false;
+        for r = 1:size(cells, 1)
+            headers = strings(1, size(cells, 2));
+            for c = 1:size(cells, 2)
+                v = cells{r, c};
+                if ischar(v) || (isstring(v) && isscalar(v) && ~ismissing(v))
+                    headers(c) = lower(regexprep(strtrim(string(v)), '[^a-zA-Z0-9]', ''));
+                end
+            end
+            if any(headers == "bus") && any(headers == "element")
+                tf = true;
+                return;
+            end
+        end
+    end
+
+    function selectAllSheets()
+        sheetList.Value = sheetList.Items;
+        updateSelectionCount();
+    end
+
+    function clearSheets()
+        sheetList.Value = {};
+        updateSelectionCount();
+    end
+
+    function updateSelectionCount()
+        sheetCountLabel.Text = sprintf('%d / %d model(s) selected for SLDD sync', ...
+            numel(sheetList.Value), numel(knownSheets));
+        detailTable.Data = cell(0, 5);
+        detailLabel.Text = 'SLDD differences: selection changed. Run Preview to compare.';
+    end
+
+    % ------------------------------------------------------------
+    % Run existing tools
+    % ------------------------------------------------------------
+    function runTasks(task)
+        source = strtrim(excelEdit.Value);
+        doSync = ismember(task, {'preview', 'sync'});
+        doParams = strcmp(task, 'parameters');
+        doApply = strcmp(task, 'sync');
+        selected = string(sheetList.Value);
+        selected = selected(:).';
+
+        if ~isfile(source)
+            uialert(fig, 'Select a valid XLSX first.', 'Missing XLSX');
+            return;
+        end
+        if isempty(projectRoot) || isempty(parametersFile)
+            uialert(fig, 'Project root is unresolved. Check ProjectRoot in the config.', ...
+                'Project not found');
+            return;
+        end
+        if doSync
+            if isempty(selected)
+                uialert(fig, 'Select at least one model/sheet to sync.', 'No model');
+                return;
+            end
+            if isempty(slddFile) || ~isfile(slddFile)
+                uialert(fig, 'Cannot find exactly one SLDD in the project.', ...
+                    'SLDD not found');
+                return;
+            end
+            if ~isfolder(fileparts(exportedFile))
+                uialert(fig, sprintf('SLDD exporter folder does not exist:\n%s', ...
+                    fileparts(exportedFile)), 'Missing exporter folder');
+                return;
+            end
+            if exist('sldd2excel_main', 'file') ~= 2
+                commonFolder = fileparts(exportedFile);
+                if isfile(fullfile(commonFolder, 'sldd2excel_main.m'))
+                    addpath(commonFolder);
+                end
+            end
+            if exist('sldd2excel_main', 'file') ~= 2
+                uialert(fig, 'sldd2excel_main.m must be on the MATLAB path.', ...
+                    'Exporter not found');
+                return;
+            end
+        end
+        if doParams && ~isfolder(fileparts(parametersFile))
+            uialert(fig, sprintf('Parameter output folder does not exist:\n%s', fileparts(parametersFile)), ...
+                'Missing target folder');
+            return;
+        end
+        if doApply
+            choice = uiconfirm(fig, sprintf([ ...
+                'Sync can ADD/REMOVE Architectural Data elements.\n\n' ...
+                'SLDD: %s\nModels: %s\n\nContinue?'], ...
+                slddFile, strjoin(selected, ', ')), ...
+                'Confirm SLDD sync', 'Icon', 'warning', ...
+                'Options', {'Sync', 'Cancel'}, ...
+                'DefaultOption', 2, 'CancelOption', 2);
+            if ~strcmp(choice, 'Sync'), return; end
+        end
+        if doParams && isfile(parametersFile)
+            choice = uiconfirm(fig, ...
+                sprintf('Parameter file already exists and will be overwritten:\n%s', parametersFile), ...
+                'Confirm overwrite', 'Icon', 'warning', ...
+                'Options', {'Overwrite', 'Cancel'}, ...
+                'DefaultOption', 2, 'CancelOption', 2);
+            if ~strcmp(choice, 'Overwrite'), return; end
+        end
+
+        enableActions('off');
+        restoreButtons = onCleanup(@() enableActions('on'));
+        try
+            if doSync
+                detailTable.Data = cell(0, 5);
+                detailLabel.Text = 'SLDD differences: comparing...';
+                if strcmp(task, 'preview')
+                    mode = 'preview';
+                else
+                    mode = 'apply';
+                end
+                appendLog(sprintf('SLDD %s: %d model(s)', mode, numel(selected)));
+                drawnow;
+                % Exporter can rely on relative project paths: run from root.
+                currentFolder = pwd;
+                restoreFolder = onCleanup(@() cd(currentFolder));
+                cd(projectRoot);
+                summary = sync_bus_interfaces_from_excel( ...
+                    source, slddFile, selected, exportedFile, mode);
+                clear restoreFolder; % Restore cwd before updating the GUI.
+                detailTable.Data = table2cell(summary.Changes);
+                detailLabel.Text = sprintf('SLDD differences: %d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
+                    summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
+                appendLog(sprintf('SLDD: ADD=%d REMOVE=%d PROPERTY_DIFF=%d SAVED=%d', ...
+                    summary.ToAdd, summary.ToRemove, ...
+                    summary.MetadataMismatch, summary.Saved));
+            end
+            if doParams
+                appendLog('Generating ALL parameter sheets ...');
+                drawnow;
+                % Deliberately EXACTLY two arguments: original generator.
+                generate_simulink_parameters(source, parametersFile);
+                appendLog('Generated: ' + string(parametersFile));
+            end
+            appendLog('Finished successfully.');
+        catch ME
+            if doSync, detailLabel.Text = 'SLDD comparison failed. See activity log.'; end
+            appendLog('ERROR: ' + string(ME.message));
+            fprintf(2, '\n%s\n', getReport(ME, 'extended', 'hyperlinks', 'off'));
+            uialert(fig, ME.message, 'Tool failed', 'Icon', 'error');
+        end
+    end
+
+    function enableActions(state)
+        if ~isvalid(fig), return; end
+        controls = [actionButtons, inputControls];
+        for k = 1:numel(controls)
+            controls(k).Enable = state;
+        end
+    end
+
+    function appendLog(message)
+        logLines{end+1, 1} = sprintf('[%s] %s', ...
+            char(datetime('now', 'Format', 'HH:mm:ss')), char(string(message)));
+        if numel(logLines) > 60, logLines = logLines(end-59:end); end
+        logArea.Value = logLines;
+        drawnow limitrate;
+        fprintf('[GUI] %s\n', char(string(message)));
+    end
+end
+
+function projectRoot = findProjectRoot(xlsxFile, guiFolder, config)
+% Search parent folders from XLSX first, then GUI script, then MATLAB pwd.
+% Also supports MATLAB started in the folder immediately ABOVE EBUS_12M.
+    seeds = {fileparts(char(xlsxFile)), guiFolder, pwd};
+    for i = 1:numel(seeds)
+        folder = seeds{i};
+        while ~isempty(folder)
+            [~, name] = fileparts(folder);
+            candidates = {};
+            if strcmpi(name, config.ProjectFolderName)
+                candidates{end+1} = folder; %#ok<AGROW>
+            end
+            if isfolder(fullfile(folder, config.ArchitectureFolder))
+                candidates{end+1} = folder; %#ok<AGROW>
+            end
+            candidates{end+1} = fullfile(folder, config.ProjectFolderName); %#ok<AGROW>
+            for k = 1:numel(candidates)
+                p = candidates{k};
+                if isfolder(fullfile(p, config.ArchitectureFolder))
+                    projectRoot = p;
+                    return;
+                end
+            end
+            parent = fileparts(folder);
+            if strcmp(parent, folder), break; end
+            folder = parent;
+        end
+    end
+    error('Could not locate project root. Set ProjectRoot in the config or place XLSX inside the project.');
+end
+
+function slddFile = findProjectSldd(projectRoot, configuredFile)
+% Prefer fixed default; otherwise accept ONLY one project-local SLDD.
+    defaultFile = local_resolvePath(configuredFile, projectRoot);
+    if isfile(defaultFile)
+        slddFile = defaultFile;
+        return;
+    end
+
+    matches = dir(fullfile(projectRoot, '**', '*.sldd'));
+    matches = matches(~[matches.isdir]);
+    if isscalar(matches)
+        slddFile = fullfile(matches(1).folder, matches(1).name);
+    else
+        slddFile = '';
+    end
+end
+
+function config = local_readConfig(configFile)
+    if ~isfile(configFile)
+        error('InterfaceTools:Config', 'Config file not found: %s', configFile);
+    end
+    [~, info] = fileattrib(configFile);
+    configFolder = fileparts(info.Name);
+    config = jsondecode(fileread(configFile));
+    names = {'SourceXlsx', 'ProjectRoot', 'ProjectFolderName', 'ArchitectureFolder', ...
+        'SlddFile', 'ParametersFile', 'ExportXlsx'};
+    if ~isstruct(config) || ~isscalar(config) || ...
+            ~all(isfield(config, names)) || ~all(ismember(fieldnames(config), names))
+        error('InterfaceTools:Config', 'Config must contain exactly: %s.', strjoin(names, ', '));
+    end
+    for k = 1:numel(names)
+        name = names{k};
+        value = config.(name);
+        if ~(ischar(value) && (isrow(value) || isempty(value)))
+            error('InterfaceTools:Config', 'Config %s must be a text value.', name);
+        end
+        config.(name) = strtrim(value);
+        if k > 2 && isempty(config.(name))
+            error('InterfaceTools:Config', 'Config %s must not be empty.', name);
+        end
+    end
+    if ~isempty(config.ProjectRoot)
+        config.ProjectRoot = local_resolvePath(config.ProjectRoot, configFolder);
+    end
+    if ~isempty(config.SourceXlsx)
+        config.SourceXlsx = local_resolvePath(config.SourceXlsx, configFolder);
+    end
+end
+
+function path = local_resolvePath(path, root)
+% Resolve relative paths without requiring the output file to exist.
+    if ispc
+        absolute = ~isempty(regexp(path, '^([A-Za-z]:[\\/]|\\\\)', 'once'));
+    else
+        absolute = startsWith(path, '/');
+    end
+    if ~absolute, path = fullfile(root, path); end
+end

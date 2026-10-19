@@ -1,5 +1,6 @@
 function [model, report] = quickSimEnv(varargin)
 %QUICKSIMENV Spin up a fresh model, load data files, link a data dictionary, and grab a config set.
+% Version: 1.0.0 (Quick simulation setup).
 %
 %   Fast pre-run setup in one call:
 %     1. Creates a new empty model and opens it (like Ctrl+N).

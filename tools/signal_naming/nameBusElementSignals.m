@@ -1,5 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
+% Version: 2.0.0 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element.
 %   OUT BUS ELEMENT: traces upstream through virtual blocks (From/Goto,
@@ -23,17 +24,22 @@ function report = nameBusElementSignals(sys, opts)
 %     .traceThroughGoto    (true)  trace From -> Goto when tracing an Out
 %                                  Bus Element upstream
 %     .traceIntoSubsystem  (true)  descend into SubSystem blocks when tracing
-%     .useLeafName         (false) element 'a.b.c' -> 'c' instead of 'a_b_c'
-%     .prefix              ('')    prefix added to every signal name
-%     .propagate           (true)  set ShowPropagatedSignals='on' on the line
-%                                  straight into/out of the bus element port
-%     .propagateTracePath  (false) also set ShowPropagatedSignals='on' on the
-%                                  intermediate lines walked while tracing an
+%     .propagate           (true)  enable propagated labels on the source output port
+%                                  of the line into/out of the bus element port
+%     .propagateTracePath  (false) also enable labels on source output ports
+%                                  along intermediate lines while tracing an
 %                                  Out Bus Element upstream
 %     .dryRun              (false) report only, do not call set_param
 %     .verbose             (true)  print the result table to the Command
 %                                  Window
 %     .maxDepth            (20)    max number of hops when tracing upstream
+%
+%   Propagation is enabled only where Simulink supports it; unsupported
+%   source blocks report propagated="n/a" on Apply. Dry-run requests no writes.
+%
+%   Names use the complete Element path (dots become underscores).
+%   Removed options prefix/useLeafName are accepted only with inactive values
+%   (empty prefix, false useLeafName); active values raise RemovedOption.
 %
 %   REPORT is a struct array with fields: block, kind ('In'/'Out'), element,
 %   name, parent, status, propagated.
@@ -47,6 +53,8 @@ function report = nameBusElementSignals(sys, opts)
 %   signal survives codegen optimization / buffer reuse. For names that must
 %   stay stable across builds, pair this with a Test Point or a named storage
 %   class.
+%
+%   Optional GUI: nameBusElementSignalsGui(sys, opts), copied alongside this file.
 %
 %   Copy this file anywhere on the MATLAB path and call it; it has no
 %   dependencies on other files in this repository.
@@ -76,7 +84,7 @@ function report = nameBusElementSignals(sys, opts)
             report(end + 1) = local_mkRow(blk, 'In', '', '', '', 'skipped: whole-bus port'); %#ok<AGROW>
             continue;
         end
-        nm = local_buildName(elem, opts);
+        nm = local_buildName(elem);
         ph = get_param(blk, 'PortHandles');
         ln = get_param(ph.Outport(1), 'Line');
         [st, nmFinal, parent] = local_applyName(ln, nm, opts);
@@ -93,7 +101,7 @@ function report = nameBusElementSignals(sys, opts)
             report(end + 1) = local_mkRow(blk, 'Out', '', '', '', 'skipped: whole-bus port'); %#ok<AGROW>
             continue;
         end
-        nm = local_buildName(elem, opts);
+        nm = local_buildName(elem);
         ph = get_param(blk, 'PortHandles');
         ln = get_param(ph.Inport(1), 'Line');
         if ~local_isValidLine(ln)
@@ -249,27 +257,33 @@ function [status, nmFinal, parent] = local_applyName(ln, nm, opts)
 end
 
 function note = local_setPropagated(ln, opts)
-    % Turn on propagated-signal label (<sig>) display for a line.
+    % ShowPropagatedSignals belongs to the line's source output PORT.
     note = '';
     if ~opts.propagate || ~local_isValidLine(ln)
         return;
     end
     ln = local_topLine(ln);
+    port = get_param(ln, 'SrcPortHandle');
+    if isempty(port) || port == -1, return; end
     try
-        if strcmp(get_param(ln, 'ShowPropagatedSignals'), 'on')
+        if strcmp(get_param(port, 'ShowPropagatedSignals'), 'on')
             note = 'on(already)'; return;
         end
     catch
-        note = 'n/a'; return;      % line does not support this property
+        note = 'n/a'; return;      % source port does not support this property
     end
     if opts.dryRun
         note = 'dry-run'; return;
     end
     try
-        set_param(ln, 'ShowPropagatedSignals', 'on');
+        set_param(port, 'ShowPropagatedSignals', 'on');
         note = 'on';
     catch ME
-        note = ['err: ' ME.message];
+        if strcmp(ME.identifier, 'Simulink:Signals:NoPropSigLabThroughBlock')
+            note = 'n/a'; % This source block/release cannot propagate labels.
+        else
+            note = ['err: ' ME.message];
+        end
     end
 end
 
@@ -286,12 +300,8 @@ function nm = local_makeUniqueName(parent, ln, nm)
     end
 end
 
-function nm = local_buildName(elem, opts)
-    if opts.useLeafName
-        parts = strsplit(elem, '.');
-        elem  = parts{end};
-    end
-    nm = [opts.prefix elem];
+function nm = local_buildName(elem)
+    nm = elem;
     nm = regexprep(nm, '[^A-Za-z0-9_]', '_');   % '.', '-', space -> '_'
     nm = regexprep(nm, '_+', '_');
     if ~isempty(nm) && ~isempty(regexp(nm(1), '\d', 'once'))
@@ -307,16 +317,24 @@ end
 function opts = local_defaults(opts)
     defaults = struct('overwrite', false, 'recurse', true, ...
         'traceThroughGoto', true, 'traceIntoSubsystem', true, ...
-        'useLeafName', false, 'prefix', '', 'propagate', true, ...
+        'propagate', true, ...
         'propagateTracePath', false, 'dryRun', false, 'verbose', true, ...
         'maxDepth', 20);
+    local_checkRemovedOptions(opts);
     fn = fieldnames(defaults);
     for i = 1:numel(fn)
         if ~isfield(opts, fn{i}) || isempty(opts.(fn{i}))
             opts.(fn{i}) = defaults.(fn{i});
         end
     end
-    opts.prefix = char(opts.prefix);
+end
+
+function local_checkRemovedOptions(opts)
+    if (isfield(opts, 'prefix') && ~isempty(char(opts.prefix))) || ...
+            (isfield(opts, 'useLeafName') && any(opts.useLeafName(:)))
+        error('SignalNaming:RemovedOption', ...
+            'prefix and useLeafName have been removed. Remove these options; names use the full Element path.');
+    end
 end
 
 function blks = local_findBusElementPorts(sys, bt, recurse)

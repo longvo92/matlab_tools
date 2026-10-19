@@ -1,15 +1,19 @@
 # MATLAB / Simulink Helpers
-Independent tools under tools/<tool_name>/, copied directly into an engineer's MATLAB path.
 
-## Constraints
-- Each tool works from one .m file (two files maximum); no shared repo helpers, package installation or download step.
-- Internal helpers are local functions, conventionally local_*. Main function and file names match; public names are camelCase, verb-first.
-- Use an opts struct, safe non-destructive defaults and current-system targets where appropriate.
-- Return a result/report; print a concise summary when nargout == 0.
-- Maintain the help header (purpose, arguments/options, example and repo-dependency note) and README tool table when behavior changes.
-- AUTOSAR bus-element ports are Inport/Outport blocks: detect IsBusElementPort == 'on'. Presence of the Element parameter alone gives false positives.
-
-## Verification
-Exercise changed tools in a live MATLAB/Simulink session when available. Otherwise sanity-check syntax/API usage and state explicitly that MATLAB execution is unverified. Use existing lint/CI checks where applicable.
-## Delivery
-Follow global Git autonomy: commit scoped changes, push the task branch and create/update a PR without another approval after relevant checks. Use a draft when verification is incomplete. Merge, release and deploy require a request. Preserve unrelated work and private data.
+- Keep tools independent under `tools/<tool_name>/`: one M-file, two at most.
+  The existing interface GUI bundle is an exception. No shared repo helpers or installation step.
+- Match function and file names. Use verb-first camelCase for new public functions
+  and local functions (usually `local_*`) for internal helpers; preserve existing APIs.
+- Use an `opts` struct, non-destructive defaults, and current-system targets where appropriate.
+  Return a result/report; print a concise summary when called without outputs.
+- Keep help headers (purpose, options, example, dependencies) and the README feature table current.
+- Version tools independently with MAJOR.MINOR.PATCH; update M-file help, README versions,
+  and CHANGELOG together. Keep all interface bundle M-files on the same version.
+- Detect AUTOSAR bus-element Inport/Outport blocks with `IsBusElementPort == 'on'`;
+  the `Element` parameter alone is insufficient.
+- Run `mh_lint .`. Exercise changed MATLAB/Simulink behavior in a live session;
+  state when execution is unverified. For interface changes, run `tests/testInterfaceTools.m`.
+  Documentation-only edits need link, rendering, and diff checks.
+- Preserve unrelated work and private data. Commit scoped changes, push the task branch,
+  and create/update a PR after checks; use a draft if verification is incomplete.
+  Merge, release, and deploy only when requested.
