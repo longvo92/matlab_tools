@@ -1,5 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
+% Version: 1.0.0 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element.
 %   OUT BUS ELEMENT: traces upstream through virtual blocks (From/Goto,

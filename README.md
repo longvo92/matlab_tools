@@ -1,125 +1,105 @@
-# matlab_tools
+<h1 align="center">MATLAB / Simulink Helpers</h1>
 
-[![MATLAB lint](https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml/badge.svg)](https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml)
+<p align="center">Small, self-contained tools for everyday Model-Based Design work.</p>
 
-Small, self-contained MATLAB / Simulink helper tools for day-to-day MBD work.
+<p align="center">
+  <a href="https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml"><img src="https://github.com/longvo92/matlab_tools/actions/workflows/matlab-lint.yml/badge.svg" alt="MATLAB lint CI"></a>
+  <a href=".github/workflows/matlab-lint.yml"><img src="https://img.shields.io/badge/Python%20(CI)-3.12-3776AB?logo=python&amp;logoColor=white" alt="Python 3.12 for CI only"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="MIT License"></a>
+</p>
 
-Most tools are a single `.m` file (two at most) with **no cross-tool dependencies**.
-The interface GUI is a bundle of three M-files plus a JSON config; SLDD actions
-also use your project's existing `sldd2excel_main` exporter.
-That means you can grab a tool straight from the GitHub web UI — open the file,
-copy its contents into your MATLAB path — without cloning or downloading the repo.
+<p align="center">
+  <a href="#features">Features</a> &middot;
+  <a href="#quick-start">Quick start</a> &middot;
+  <a href="#interface-tools">Interface tools</a> &middot;
+  <a href="https://github.com/longvo92/matlab_tools/issues">Issues</a> &middot;
+  <a href="#versioning">Versions</a> &middot;
+  <a href="#license">License</a>
+</p>
 
-## Layout
+## Features
 
-```
-tools/
-  <tool_name>/<mainFunction>.m   # one folder per tool, function name = file name
-```
+| Tool | Version | What it does | Copy |
+| --- | --- | --- | --- |
+| **Bus element signal naming** | `1.0.0` | Names signals from In/Out Bus Element ports, traces upstream through virtual blocks and subsystems, and enables propagated names. | [nameBusElementSignals.m](tools/signal_naming/nameBusElementSignals.m) |
+| **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
+| **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
+| **Interface tools** | `1.5.0` | Generates parameter M-files from Excel; previews every `bus.element` difference and syncs selected SLDD interfaces. Separate Parameter M-file and SLDD panels. | [Interface bundle](tools/interface_tools/) |
 
-Each `.m` file starts with an `help` block documenting its arguments, options,
-and an example, so `help <functionName>` works after you copy it in.
+## Quick start
 
-## Tools
-
-| Tool | File | What it does |
-|------|------|--------------|
-| Bus element signal naming | [`tools/signal_naming/nameBusElementSignals.m`](tools/signal_naming/nameBusElementSignals.m) | Names the signal on each In/Out Bus Element block after that block's `Element`, tracing upstream through From/Goto and subsystems to find the real source for Out Bus Elements, and turns on propagated-signal display. Built for AUTOSAR-style models. |
-| Forbidden block checker | [`tools/forbidden_blocks/checkForbiddenBlocks.m`](tools/forbidden_blocks/checkForbiddenBlocks.m) | Checks a model and its referenced models against configurable JSON rules before code generation. Commented blocks and blocks whose outputs connect only to Terminators are reported as warnings; active violations stop the pipeline. Copy the adjacent `forbidden_blocks.json` with the tool. |
-| Quick simulation setup | [`tools/quick_sim/quickSimEnv.m`](tools/quick_sim/quickSimEnv.m) | Creates a new empty model, copies any number of `.mat` files straight into its model workspace (objects a model workspace cannot store, such as bus objects and config sets, go to the base workspace), runs `.m` scripts in the base workspace, optionally links a `.sldd` data dictionary (name it, or pass `'sldd'` to auto-find the project's), and auto-links the first config set found in the base workspace. |
-
-| Interface tools | [`tools/interface_tools/interface_tools_gui.m`](tools/interface_tools/interface_tools_gui.m) | Separate Parameter M-file and SLDD panels. Generate parameters from all sheets, preview every `bus.element` addition/removal/property difference, or sync additions/removals for selected sheets. Copy all three M-files and the adjacent JSON config. |
-
-## Usage
-
-Copy a tool's `.m` file somewhere on your MATLAB path, then call it. Examples:
+Copy the tool you need into a folder on your MATLAB path. No package installation
+or shared repository helpers are needed. Keep adjacent JSON files with their tools;
+copy the entire interface bundle when using its GUI.
 
 ```matlab
-% Name the current system's bus element signals and show propagated names
-nameBusElementSignals(gcs)
+% Preview signal naming changes in the current system
+report = nameBusElementSignals(gcs, struct('dryRun', true));
 
-% Stop immediately when the model contains an active forbidden block
-checkForbiddenBlocks('EVCC_ChargeCtrl')
+% Check the model and its references before code generation
+checkForbiddenBlocks('MyModel')
 
-% New model + load stimuli into its model workspace + auto-link a config set
-quickSimEnv('drive_cycle.mat')
+% New model with stimuli, calibration script, and a data dictionary
+quickSimEnv('drive_cycle.mat', 'calib_params.m', 'project.sldd')
 
-% Several data files at once, loaded in the order given: .mat files into the
-% model workspace (bus objects and config sets into the base workspace),
-% .m scripts run in the base workspace
-quickSimEnv('drive_cycle.mat', 'calib_params.m', 'bus_defs.mat')
-
-% Data + link a data dictionary; 'sldd' auto-finds the project's dictionary
-quickSimEnv('drive_cycle.mat', 'projData.sldd')
-quickSimEnv('drive_cycle.mat', 'sldd')
-
-% No data file: still creates the model and links the config
-quickSimEnv
-```
-
-See each file's header (`help nameBusElementSignals`, `help checkForbiddenBlocks`,
-`help quickSimEnv`) for the full option list.
-
-### Interface tools
-
-Requires MATLAB/Simulink R2024a or later. Copy `tools/interface_tools/` together,
-then call `interface_tools_gui`. The existing entry-point names are retained.
-
-Edit [`interface_tools_config.json`](tools/interface_tools/interface_tools_config.json)
-to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, `ParametersFile`, and `ExportXlsx`.
-Use `/` or escaped `\\` in JSON paths. Empty `SourceXlsx` opens the file picker
-workflow; empty `ProjectRoot` discovers the project from the workbook, tool folder,
-or current folder using `ProjectFolderName` and `ArchitectureFolder`.
-`SourceXlsx` and `ProjectRoot` are relative to the config folder; output paths
-are relative to the project root. Absolute paths are also accepted. If the preferred
-SLDD is absent, the GUI accepts a single project-local SLDD, as before.
-
-```matlab
+% Open the Excel / SLDD interface GUI
 interface_tools_gui
-% Keep machine-specific paths outside the repository:
+```
+
+Use `help <functionName>` for options and examples. `quickSimEnv` puts MAT data in
+the model workspace, falling back to the base workspace for incompatible objects
+such as bus objects and config sets. M-file scripts run in the base workspace.
+Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
+and link the first available config set.
+
+These are MATLAB/Simulink tools. Python 3.12 is used only by the
+[CI lint workflow](.github/workflows/matlab-lint.yml), which runs MISS_HIT without
+a MATLAB license.
+
+## Interface tools
+
+Requires MATLAB/Simulink R2024a or later. Copy all three M-files and the JSON config
+from [`tools/interface_tools/`](tools/interface_tools/) into the same folder.
+
+Edit [interface_tools_config.json](tools/interface_tools/interface_tools_config.json)
+to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, `ParametersFile`, and `ExportXlsx`.
+Use `/` or escaped `\\` in JSON paths. `SourceXlsx` and `ProjectRoot` are relative
+to the config folder; output paths are relative to the project root. Absolute
+paths are accepted.
+
+Leave `SourceXlsx` empty to choose a workbook in the GUI. Leave `ProjectRoot` empty
+to discover it from the workbook, tool folder, or current folder using
+`ProjectFolderName` and `ArchitectureFolder`. If the preferred SLDD is absent,
+the GUI accepts a single project-local SLDD.
+
+```matlab
+% Optional: keep machine-specific paths outside the repository
 interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json'))
 ```
 
-**Parameter M-file** always processes all parameter sheets, regardless of the
-SLDD sheet selection, and asks before overwriting an existing output file.
-**SLDD interfaces** provides Preview and Sync for selected sheets. The differences
-table includes every `ADD`, `REMOVE`, and `PROPERTY_DIFF`, with full `bus.element`
-names and XLSX/SLDD property values. Property differences are report-only; Sync
-applies additions/removals and asks for confirmation. Preview does not modify the
-SLDD, but regenerates the export workbook. The backend also returns the full table
-as `summary.Changes`, preserving the existing summary counters and CLI arguments.
+| Panel | Behavior |
+| --- | --- |
+| **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting the output. |
+| **SLDD interfaces** | Preview lists every `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`, with XLSX/SLDD property values. Sync confirms before applying additions/removals for selected sheets. Existing property differences remain report-only. |
 
-SLDD actions require `sldd2excel_main` on the path or beside `ExportXlsx`. It must
-run without arguments and export **the configured target dictionary** to the
-configured export path. This project-specific exporter is not included.
+Preview leaves the SLDD unchanged but regenerates the export workbook. The sync
+backend also returns the complete differences table in `summary.Changes`.
 
-Run the isolated workbook/dictionary and GUI callback regression in live MATLAB:
+SLDD actions require your project's **`sldd2excel_main`** exporter on the MATLAB
+path or beside `ExportXlsx`. It must run without arguments and export the configured
+target dictionary to the configured path. The exporter is not included;
+parameter generation works independently of it.
 
-```matlab
-addpath('tests')
-testInterfaceTools
-```
+## Versioning
 
-## Continuous checks
+Each tool uses its own **MAJOR.MINOR.PATCH** version: breaking changes, compatible
+features, and fixes. Find the current version in the feature table or with
+`help <functionName>`. The three interface M-files share one bundle version.
+The interface bundle continues the imported `1.4.1` version as `1.5.0`; other
+tools start at `1.0.0` as their first tracked baseline.
 
-Every push and pull request runs [MISS_HIT](https://florianschanda.github.io/miss_hit/)
-over all `.m` files ([workflow](.github/workflows/matlab-lint.yml)). It is a
-pure-Python analyzer, so the checks need no MATLAB license.
-
-- **`mh_lint`** parses each file and flags likely bugs — a syntax error or a lint
-  finding fails the build.
-- **`mh_style`** and **`mh_metric`** report formatting and complexity as advisory
-  output; they never block a merge.
-
-Run the same checks locally before pushing:
-
-```bash
-pip install miss_hit
-mh_lint .      # gate: syntax + bug checks
-mh_style .     # advisory: formatting
-mh_metric .    # advisory: complexity
-```
+See [CHANGELOG.md](CHANGELOG.md) for each tool's version history.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) &copy; 2026 Long Vo.

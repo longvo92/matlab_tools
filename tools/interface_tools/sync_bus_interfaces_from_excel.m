@@ -1,5 +1,6 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, exportXlsxFile, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare 2 XLSX files before modifying SLDD.
+% Version: 1.5.0 (Interface tools bundle).
 %
 % MATLAB R2024b. Writes to ARCHITECTURAL DATA, never to Design Data.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
@@ -52,7 +53,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.4.1\n');
+    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.5.0\n');
     fprintf('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');

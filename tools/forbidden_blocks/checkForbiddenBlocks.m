@@ -1,5 +1,6 @@
 function result = checkForbiddenBlocks(modelName, opts)
 %CHECKFORBIDDENBLOCKS Check a Simulink model for blocks prohibited by JSON rules.
+% Version: 1.0.0 (Forbidden block checker).
 %
 %   RESULT = CHECKFORBIDDENBLOCKS() checks the current model.
 %   RESULT = CHECKFORBIDDENBLOCKS(MODELNAME) checks MODELNAME and, by

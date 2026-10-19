@@ -1,5 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
+% Version: 1.5.0 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
