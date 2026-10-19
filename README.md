@@ -21,7 +21,7 @@
 
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
-| **Bus element signal naming** | `1.0.0` | Names signals from In/Out Bus Element ports, traces upstream through virtual blocks and subsystems, and enables propagated names. | [nameBusElementSignals.m](tools/signal_naming/nameBusElementSignals.m) |
+| **Bus element signal naming** | `1.1.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.5.0` | Generates parameter M-files from Excel; previews every `bus.element` difference and syncs selected SLDD interfaces. Separate Parameter M-file and SLDD panels. | [Interface bundle](tools/interface_tools/) |
@@ -35,6 +35,9 @@ copy the entire interface bundle when using its GUI.
 ```matlab
 % Preview signal naming changes in the current system
 report = nameBusElementSignals(gcs, struct('dryRun', true));
+
+% Or open the signal naming GUI (copy both signal_naming M-files)
+nameBusElementSignalsGui
 
 % Check the model and its references before code generation
 checkForbiddenBlocks('MyModel')
@@ -51,6 +54,12 @@ the model workspace, falling back to the base workspace for incompatible objects
 such as bus objects and config sets. M-file scripts run in the base workspace.
 Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
 and link the first available config set.
+
+The signal naming GUI defaults to the current model/subsystem. It provides a
+prefix, subsystem scope, overwrite, leaf-name, and propagated-name options.
+**Preview** reports proposed changes; **Apply** edits the model in memory without
+saving it. The propagation column shows `n/a` when a line does not support the
+backend display property. The CLI remains usable from its single M-file.
 
 These are MATLAB/Simulink tools. Python 3.12 is used only by the
 [CI lint workflow](.github/workflows/matlab-lint.yml), which runs MISS_HIT without
@@ -95,8 +104,8 @@ parameter generation works independently of it.
 Each tool uses its own **MAJOR.MINOR.PATCH** version: breaking changes, compatible
 features, and fixes. Find the current version in the feature table or with
 `help <functionName>`. The three interface M-files share one bundle version.
-The interface bundle continues the imported `1.4.1` version as `1.5.0`; other
-tools start at `1.0.0` as their first tracked baseline.
+The interface bundle continues the imported `1.4.1` version as `1.5.0`. Other
+tools begin their tracked history at `1.0.0`; signal naming adds its GUI in `1.1.0`.
 
 See [CHANGELOG.md](CHANGELOG.md) for each tool's version history.
 

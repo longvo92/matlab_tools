@@ -1,6 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
-% Version: 1.0.0 (Signal naming).
+% Version: 1.1.0 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element.
 %   OUT BUS ELEMENT: traces upstream through virtual blocks (From/Goto,
@@ -48,6 +48,8 @@ function report = nameBusElementSignals(sys, opts)
 %   signal survives codegen optimization / buffer reuse. For names that must
 %   stay stable across builds, pair this with a Test Point or a named storage
 %   class.
+%
+%   Optional GUI: nameBusElementSignalsGui(sys, opts), copied alongside this file.
 %
 %   Copy this file anywhere on the MATLAB path and call it; it has no
 %   dependencies on other files in this repository.

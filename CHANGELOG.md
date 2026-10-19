@@ -13,6 +13,13 @@
 
 ## Bus element signal naming
 
+### 1.1.0 - 2026-10-19
+
+- Add an optional GUI with current-system selection, prefix and common naming
+  options, Preview/Apply actions, and a complete results table.
+- Preview leaves the model unchanged; Apply edits in memory without saving.
+  The existing single-file CLI and its defaults remain compatible.
+
 ### 1.0.0 - 2026-10-19
 
 - Establish the first tracked version of the existing tool: name signals from
