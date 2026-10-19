@@ -13,6 +13,15 @@
 
 ## Bus element signal naming
 
+### 2.0.0 - 2026-10-19
+
+- Remove name-prefix and leaf-element naming from CLI and GUI; always derive
+  names from the complete Element path. Reject active legacy options explicitly;
+  empty prefix and false leaf-name values remain accepted.
+- Fix Show propagated labels by configuring the source output port rather than
+  the signal line handle. Preview remains read-only.
+- Compact the GUI to subsystem scope, overwrite, and propagated-label options.
+
 ### 1.1.0 - 2026-10-19
 
 - Add an optional GUI with current-system selection, prefix and common naming

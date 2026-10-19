@@ -1,13 +1,13 @@
 function fig = nameBusElementSignalsGui(sys, opts)
 %NAMEBUSELEMENTSIGNALSGUI Preview and apply bus-element signal names.
-% Version: 1.1.0 (Signal naming).
+% Version: 2.0.0 (Signal naming).
 %   nameBusElementSignalsGui
 %   fig = nameBusElementSignalsGui('MyModel/Subsystem')
-%   fig = nameBusElementSignalsGui(gcs, struct('prefix', 'sig_'))
+%   fig = nameBusElementSignalsGui(gcs, struct('overwrite', true))
 %
 % SYS defaults to the current Simulink system. Use current refreshes it.
 % OPTS initializes nameBusElementSignals options. The GUI exposes overwrite,
-% recurse, propagate, useLeafName, and prefix; remaining options retain their
+% recurse, and propagate; remaining options retain their
 % backend defaults or supplied values. Preview always uses dryRun=true.
 % Apply edits the model in memory without saving it. Verbose output is off.
 % The latest backend report is available in fig.UserData.Report.
@@ -23,8 +23,12 @@ function fig = nameBusElementSignalsGui(sys, opts)
         error('SignalNaming:MissingBackend', ...
             'Copy nameBusElementSignals.m alongside this GUI on the MATLAB path.');
     end
-    defaults = struct('overwrite', false, 'recurse', true, ...
-        'propagate', true, 'useLeafName', false, 'prefix', '');
+    if (isfield(opts, 'prefix') && ~isempty(char(opts.prefix))) || ...
+            (isfield(opts, 'useLeafName') && any(opts.useLeafName(:)))
+        error('SignalNaming:RemovedOption', ...
+            'prefix and useLeafName have been removed. Names use the full Element path.');
+    end
+    defaults = struct('overwrite', false, 'recurse', true, 'propagate', true);
     fields = fieldnames(defaults);
     for k = 1:numel(fields)
         field = fields{k};
@@ -33,11 +37,11 @@ function fig = nameBusElementSignalsGui(sys, opts)
         end
     end
     busy = false;
-    fig = uifigure('Name', 'Bus Element Signal Naming v1.1.0', ...
-        'Position', [220 140 840 540], 'CloseRequestFcn', @(~, ~) closeGui());
+    fig = uifigure('Name', 'Bus Element Signal Naming v2.0.0', ...
+        'Position', [220 140 840 480], 'CloseRequestFcn', @(~, ~) closeGui());
     fig.UserData = struct('Report', [], 'Mode', '', 'Error', '');
-    grid = uigridlayout(fig, [8 1], ...
-        'RowHeight', {26, 30, 30, 52, 32, 24, '1x', 22}, ...
+    grid = uigridlayout(fig, [7 1], ...
+        'RowHeight', {26, 30, 26, 32, 24, '1x', 22}, ...
         'Padding', [16 12 16 12], 'RowSpacing', 8);
     uilabel(grid, 'Text', 'Bus Element Signal Naming', ...
         'FontSize', 18, 'FontWeight', 'bold');
@@ -49,22 +53,15 @@ function fig = nameBusElementSignalsGui(sys, opts)
         'ValueChangedFcn', @(~, ~) invalidate());
     current = uibutton(targetGrid, 'Text', 'Use current', 'Tag', 'UseCurrent', ...
         'ButtonPushedFcn', @(~, ~) useCurrent());
-    prefixGrid = uigridlayout(grid, [1 2], ...
-        'ColumnWidth', {110, '1x'}, 'Padding', [0 0 0 0]);
-    uilabel(prefixGrid, 'Text', 'Name prefix');
-    prefix = uieditfield(prefixGrid, 'text', 'Value', char(opts.prefix), 'Tag', 'NamePrefix', ...
-        'Placeholder', 'Optional, for example sig_', 'ValueChangedFcn', @(~, ~) invalidate());
-    optionGrid = uigridlayout(grid, [2 2], ...
-        'ColumnWidth', {'1x', '1x'}, 'RowHeight', {22, 22}, ...
-        'Padding', [0 0 0 0], 'RowSpacing', 4);
+    optionGrid = uigridlayout(grid, [1 3], ...
+        'ColumnWidth', {'1x', '1x', '1x'}, 'RowHeight', {22}, ...
+        'Padding', [0 0 0 0]);
     recurse = uicheckbox(optionGrid, 'Text', 'Include subsystems', ...
         'Value', opts.recurse, 'Tag', 'Recurse', 'ValueChangedFcn', @(~, ~) invalidate());
     overwrite = uicheckbox(optionGrid, 'Text', 'Overwrite existing names', ...
         'Value', opts.overwrite, 'Tag', 'Overwrite', 'ValueChangedFcn', @(~, ~) invalidate());
     propagate = uicheckbox(optionGrid, 'Text', 'Show propagated names', ...
         'Value', opts.propagate, 'Tag', 'Propagate', 'ValueChangedFcn', @(~, ~) invalidate());
-    leaf = uicheckbox(optionGrid, 'Text', 'Use leaf element name', ...
-        'Value', opts.useLeafName, 'Tag', 'UseLeafName', 'ValueChangedFcn', @(~, ~) invalidate());
     actionGrid = uigridlayout(grid, [1 3], ...
         'ColumnWidth', {120, 120, '1x'}, 'Padding', [0 0 0 0]);
     preview = uibutton(actionGrid, 'Text', 'Preview', 'Tag', 'Preview', ...
@@ -74,11 +71,11 @@ function fig = nameBusElementSignalsGui(sys, opts)
     status = uilabel(grid, 'Text', 'Ready. Preview to inspect proposed signal names.', ...
         'Tag', 'Status', 'Interpreter', 'none');
     results = uitable(grid, 'Data', cell(0, 6), 'Tag', 'NamingResults', ...
-        'ColumnName', {'Kind', 'Element', 'Signal name', 'Status', 'Block', 'Propagation'}, ...
-        'ColumnWidth', {50, 140, 140, 210, 220, 110}, ...
+        'ColumnName', {'Kind', 'Element', 'Signal name', 'Status', 'Propagation', 'Block'}, ...
+        'ColumnWidth', {45, 130, 130, 180, 90, 'auto'}, ...
         'ColumnEditable', false, 'RowName', {});
     uilabel(grid, 'Text', 'Apply updates the model in memory. Save it in Simulink after review.');
-    controls = [target, current, prefix, recurse, overwrite, propagate, leaf, preview, apply];
+    controls = [target, current, recurse, overwrite, propagate, preview, apply];
 
     function useCurrent()
         target.Value = local_currentSystem();
@@ -106,11 +103,9 @@ function fig = nameBusElementSignalsGui(sys, opts)
         status.Text = 'Processing...';
         drawnow;
         runOpts = opts;
-        runOpts.prefix = prefix.Value;
         runOpts.recurse = recurse.Value;
         runOpts.overwrite = overwrite.Value;
         runOpts.propagate = propagate.Value;
-        runOpts.useLeafName = leaf.Value;
         runOpts.dryRun = dryRun;
         runOpts.verbose = false;
         try
@@ -118,7 +113,7 @@ function fig = nameBusElementSignalsGui(sys, opts)
             data = cell(numel(report), 6);
             for row = 1:numel(report)
                 data(row, :) = {report(row).kind, report(row).element, report(row).name, ...
-                    report(row).status, report(row).block, report(row).propagated};
+                    report(row).status, report(row).propagated, report(row).block};
             end
             results.Data = data;
             if dryRun, mode = 'Preview'; else, mode = 'Apply'; end

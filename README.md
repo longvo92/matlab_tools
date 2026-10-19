@@ -21,7 +21,7 @@
 
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
-| **Bus element signal naming** | `1.1.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
+| **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.5.0` | Generates parameter M-files from Excel; previews every `bus.element` difference and syncs selected SLDD interfaces. Separate Parameter M-file and SLDD panels. | [Interface bundle](tools/interface_tools/) |
@@ -55,11 +55,20 @@ such as bus objects and config sets. M-file scripts run in the base workspace.
 Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
 and link the first available config set.
 
-The signal naming GUI defaults to the current model/subsystem. It provides a
-prefix, subsystem scope, overwrite, leaf-name, and propagated-name options.
-**Preview** reports proposed changes; **Apply** edits the model in memory without
-saving it. The propagation column shows `n/a` when a line does not support the
-backend display property. The CLI remains usable from its single M-file.
+The signal naming GUI defaults to the current model/subsystem. It provides
+subsystem scope, overwrite, and propagated-name options. Names use the complete
+Element path, with dots replaced by underscores. **Preview** reports proposed
+changes; **Apply** edits the model in memory without saving it. Propagated labels
+are enabled on supported source output ports; unsupported blocks report `n/a`.
+In Bus Element selection labels require R2024b or later
+([MathWorks](https://www.mathworks.com/help/simulink/ug/signal-label-propagation.html)). The CLI remains
+usable from its single M-file. If propagated labels remain `<>` after Apply,
+use Update Diagram (`Ctrl+D`) to resolve them; the tool does not compile models
+automatically.
+
+Since `2.0.0`, prefix and leaf-name options are removed. Existing calls with an
+empty prefix or `useLeafName=false` remain accepted; active legacy values raise
+`SignalNaming:RemovedOption`. Remove those options to use full Element names.
 
 These are MATLAB/Simulink tools. Python 3.12 is used only by the
 [CI lint workflow](.github/workflows/matlab-lint.yml), which runs MISS_HIT without
