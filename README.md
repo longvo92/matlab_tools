@@ -24,7 +24,7 @@
 | **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
-| **Interface tools** | `1.5.0` | Generates parameter M-files from Excel; previews every `bus.element` difference and syncs selected SLDD interfaces. Separate Parameter M-file and SLDD panels. | [Interface bundle](tools/interface_tools/) |
+| **Interface tools** | `1.6.0` | Compares Excel directly with SLDD Data Interfaces; previews every `bus.element` difference, syncs selected interfaces, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
 
@@ -80,7 +80,7 @@ Requires MATLAB/Simulink R2024a or later. Copy all three M-files and the JSON co
 from [`tools/interface_tools/`](tools/interface_tools/) into the same folder.
 
 Edit [interface_tools_config.json](tools/interface_tools/interface_tools_config.json)
-to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, `ParametersFile`, and `ExportXlsx`.
+to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, and `ParametersFile`.
 Use `/` or escaped `\\` in JSON paths. `SourceXlsx` and `ProjectRoot` are relative
 to the config folder; output paths are relative to the project root. Absolute
 paths are accepted.
@@ -100,20 +100,36 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 | **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting the output. |
 | **SLDD interfaces** | Preview lists every `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`, with XLSX/SLDD property values. Sync confirms before applying additions/removals for selected sheets. Existing property differences remain report-only. |
 
-Preview leaves the SLDD unchanged but regenerates the export workbook. The sync
-backend also returns the complete differences table in `summary.Changes`.
+Preview reads **all Data Interfaces in Architectural Data**, including referenced
+and empty interfaces, directly from the configured SLDD. Service/Physical
+Interfaces and buses in Design Data are excluded. No `sldd2excel_main` or
+intermediate Excel workbook is needed.
 
-SLDD actions require your project's **`sldd2excel_main`** exporter on the MATLAB
-path or beside `ExportXlsx`. It must run without arguments and export the configured
-target dictionary to the configured path. The exporter is not included;
-parameter generation works independently of it.
+With all sheets selected, comparison includes SLDD-only elements. With a subset,
+it compares buses named in those sheets, collecting their expected elements from
+all workbook sheets to protect shared elements. Sync only changes local buses
+named in selected sheets; SLDD-only buses and references remain report-only.
+Empty interfaces are retained. Apply refuses pending edits in the dictionary or its references.
+
+```matlab
+summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');
+% Review summary.Changes, then apply additions/removals:
+summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'apply');
+```
+
+`summary.Changes` contains the complete differences table. `summary.Interfaces`
+lists each Data Interface's name, element count, and reference status;
+`summary.OutOfScope` counts report-only removals outside selected buses.
+Preview never edits or saves the SLDD. Existing property differences remain
+report-only. Legacy five-argument calls and configs with `ExportXlsx` are accepted;
+the export path is ignored and never read, written, or deleted.
 
 ## Versioning
 
 Each tool uses its own **MAJOR.MINOR.PATCH** version: breaking changes, compatible
 features, and fixes. Find the current version in the feature table or with
 `help <functionName>`. The three interface M-files share one bundle version.
-The interface bundle continues the imported `1.4.1` version as `1.5.0`. Other
+The interface bundle continues the imported `1.4.1` version. Other
 tools begin their tracked history at `1.0.0`; signal naming adds its GUI in `1.1.0`.
 
 See [CHANGELOG.md](CHANGELOG.md) for each tool's version history.

@@ -2,6 +2,17 @@
 
 ## Interface tools
 
+### 1.6.0 - 2026-10-20
+
+- Compare Excel directly with every Architectural Data Data Interface, including
+  references, nested/typed elements, and an inventory of empty interfaces.
+- Remove the external exporter and intermediate Excel dependency from CLI and GUI;
+  retain legacy calls/configs without touching their export paths.
+- Include SLDD-only elements in all-sheet comparisons, retaining buses outside
+  selected sheets and keeping referenced interfaces report-only.
+- Protect unsaved dictionary edits during Preview/Apply and discard partial sync
+  changes if an addition fails.
+
 ### 1.5.0 - 2026-10-19
 
 - Separate Parameter M-file and SLDD panels; remove the combined action.

@@ -17,41 +17,38 @@ function testInterfaceTools()
     dictCleanup = onCleanup(@() local_close(dd));
     bus = addDataInterface(dd, 'BusA');
     source = {'Bus', 'Element', 'DataType', 'Dim', 'Status', 'Parameter', 'Value'};
-    actual = {'Port', 'Element', 'DataType', 'Dim'};
     for k = 1:25
         name = sprintf('Keep%02d', k);
         elem = addElement(bus, name);
         elem.Type.DataType = 'uint8';
         elem.Dimensions = '1';
         source(end+1, :) = {'BusA', name, 'double', '1', 'Accept', sprintf('pA%02d', k), k}; %#ok<AGROW>
-        actual(end+1, :) = {'BusA', name, 'uint8', '1'}; %#ok<AGROW>
     end
     for k = 1:35
         source(end+1, :) = {'BusA', sprintf('New%02d', k), 'double', '1', '', '', ''}; %#ok<AGROW>
     end
     addElement(bus, 'Old');
     addElement(bus, 'Shared');
-    actual(end+1, :) = {'BusA', 'Old', 'double', '1'};
-    actual(end+1, :) = {'BusA', 'Shared', 'double', '1'};
     other = addDataInterface(dd, 'BusB');
     addElement(other, 'Safe');
-    actual(end+1, :) = {'BusB', 'Safe', 'double', '1'};
     save(dd);
     close(dd);
     writecell(source, 'source.xlsx', 'Sheet', 'ModelA');
     sourceB = [source(1, :); {'BusA', 'Shared', 'double', '1', 'Accept', 'pShared', 9}; ...
         {'BusB', 'Safe', 'double', '1', 'Accept', 'pSafe', 10}];
     writecell(sourceB, 'source.xlsx', 'Sheet', 'ModelB');
-    writecell(actual, 'snapshot.xlsx', 'Sheet', 'BusElement');
     local_write('sldd2excel_main.m', ...
-        'copyfile(fullfile(pwd, ''snapshot.xlsx''), fullfile(pwd, ''export.xlsx''));');
+        'error(''Exporter must never be called.'');');
     config = jsondecode(fileread(fullfile(toolFolder, 'interface_tools_config.json')));
     config.SourceXlsx = 'source.xlsx';
     config.ProjectRoot = ''; % Discover via the custom architecture marker.
     config.ArchitectureFolder = 'arch';
     config.SlddFile = 'arch/test.sldd';
     config.ParametersFile = 'arch/parameters.m';
-    config.ExportXlsx = 'export.xlsx';
+    % Legacy config/path remains accepted but must never be touched.
+    config.ExportXlsx = 'missing/export.xlsx';
+    local_write('export.xlsx', 'legacy export sentinel');
+    legacyExport = local_bytes('export.xlsx');
     configFile = fullfile(sandbox, 'config.json');
     local_write(configFile, jsonencode(config));
     before = local_bytes(dictionary);
@@ -60,6 +57,7 @@ function testInterfaceTools()
     assert(height(summary.Changes) == 61 && ~summary.Saved);
     assert(contains(console, 'BusA.New35') && contains(console, 'BusA.Keep25'));
     assert(isequal(before, local_bytes(dictionary)), 'Preview changed the dictionary.');
+    assert(isequal(legacyExport, local_bytes('export.xlsx')));
     assert(~any(strcmp(summary.Changes.Interface, 'BusA.Shared')));
     assert(~any(startsWith(summary.Changes.Interface, 'BusB.')));
 
@@ -102,14 +100,7 @@ function testInterfaceTools()
     close(dd);
     clear dictCleanup;
 
-    % Refresh the synthetic exporter snapshot after Apply. Metadata-only plans
-    % and empty plans must still return a complete, correctly shaped table.
-    actual = actual(~strcmp(actual(:, 2), 'Old'), :);
-    for k = 1:35
-        actual(end+1, :) = {'BusA', sprintf('New%02d', k), 'double', '1'}; %#ok<AGROW>
-    end
-    delete('snapshot.xlsx');
-    writecell(actual, 'snapshot.xlsx', 'Sheet', 'BusElement');
+    % Direct reads must observe Apply immediately, without a workbook snapshot.
     [~, summary] = evalc('sync_bus_interfaces_from_excel(''source.xlsx'', dictionary, ''ModelA'', ''export.xlsx'', ''preview'')');
     assert(summary.ToAdd == 0 && summary.ToRemove == 0 && summary.MetadataMismatch == 25);
     assert(height(summary.Changes) == 25 && ~summary.Saved);
@@ -118,6 +109,7 @@ function testInterfaceTools()
     [~, summary] = evalc('sync_bus_interfaces_from_excel(''source.xlsx'', dictionary, ''ModelA'', ''export.xlsx'', ''preview'')');
     assert(isempty(summary.Changes) && width(summary.Changes) == 5 && ~summary.Saved);
 
+    config = rmfield(config, 'ExportXlsx'); % New configs need no exporter setting.
     config.ProjectRoot = sandbox; % Explicit root and absolute source/output paths.
     config.SourceXlsx = fullfile(sandbox, 'source.xlsx');
     config.ParametersFile = fullfile(sandbox, 'arch', 'absolute.m');
@@ -141,8 +133,140 @@ function testInterfaceTools()
         rejected = strcmp(ME.identifier, 'InterfaceTools:Config');
     end
     assert(rejected, 'Invalid config must fail before creating a GUI.');
+    local_testDirectSnapshot(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
+end
+
+function local_testDirectSnapshot(sandbox)
+    referenceFile = fullfile(sandbox, 'reference.sldd');
+    ref = Simulink.dictionary.archdata.create(referenceFile);
+    refCleanup = onCleanup(@() local_close(ref));
+    refBus = addDataInterface(ref, 'Referenced');
+    addElement(refBus, 'Keep');
+    save(ref);
+    close(ref);
+
+    file = fullfile(sandbox, 'direct.sldd');
+    dd = Simulink.dictionary.archdata.create(file);
+    cleanup = onCleanup(@() local_close(dd));
+    addReference(dd, 'reference.sldd');
+    inner = addDataInterface(dd, 'Inner');
+    addElement(inner, 'Value');
+    bus = addDataInterface(dd, 'Bus');
+    elem = addElement(bus, 'Vector');
+    elem.Type.DataType = 'single';
+    elem.Dimensions = '[2 3]';
+    elem.Type.Unit = 'm/s';
+    elem.Description = 'Vehicle speed';
+    elem = addElement(bus, 'Nested');
+    elem.Type = inner;
+    record = addStructType(dd, 'Record');
+    elem = addElement(bus, 'Struct');
+    elem.Type = record;
+    alias = addAliasType(dd, 'Counter');
+    alias.BaseType = 'uint8';
+    elem = addElement(bus, 'Alias');
+    elem.Type = alias;
+    value = addValueType(dd, 'Speed');
+    value.DataType = 'single';
+    value.Unit = 'm/s';
+    elem = addElement(bus, 'NamedValue');
+    elem.Type = value;
+    addDataInterface(dd, 'Empty');
+    orphan = addDataInterface(dd, 'OnlyInSldd');
+    addElement(orphan, 'Preserve');
+    addServiceInterface(dd, 'Service');
+    addPhysicalInterface(dd, 'Physical');
+    save(dd);
+    close(dd);
+    design = Simulink.data.dictionary.open(file);
+    section = getSection(design, 'Design Data');
+    addEntry(section, 'DesignBus', Simulink.Bus);
+    saveChanges(design);
+    close(design);
+    before = local_bytes(file);
+    refBefore = local_bytes(referenceFile);
+
+    source = fullfile(sandbox, 'direct.xlsx');
+    rows = {'Bus', 'Element', 'DataType', 'Dim', 'Unit', 'Description'; ...
+        'Bus', 'Vector', 'single', '2x3', 'm/s', 'Vehicle speed'; ...
+        'Bus', 'Nested', 'Bus: Inner', '1', '', ''; ...
+        'Bus', 'Struct', 'Bus: Record', '1', '', ''; ...
+        'Bus', 'Alias', 'Counter', '1', '', ''; ...
+        'Bus', 'NamedValue', 'single', '1', 'm/s', ''; ...
+        'Inner', 'Value', 'double', '1', '', ''; ...
+        'Referenced', 'Keep', 'uint8', '1', '', ''; ...
+        'Referenced', 'New', 'double', '1', '', ''; ...
+        'NewBus', 'New', 'uint16', '2', '', ''};
+    writecell(rows, source);
+    [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
+    assert(report.ToAdd == 2 && report.ToRemove == 1 && report.MetadataMismatch == 1);
+    assert(report.OutOfScope == 1 && height(report.Interfaces) == 5);
+    assert(ismember('Empty', report.Interfaces.Name));
+    assert(~any(ismember({'Service', 'Physical', 'DesignBus'}, report.Interfaces.Name)));
+    assert(report.Interfaces.Referenced(strcmp(report.Interfaces.Name, 'Referenced')));
+    assert(isequal(before, local_bytes(file)) && isequal(refBefore, local_bytes(referenceFile)));
+    report = sync_bus_interfaces_from_excel(source, file, 'all', 'apply');
+    assert(report.Added == 1 && report.NewInterfaces == 1 && report.Removed == 0);
+    assert(report.Saved && report.ReferencedSkipped == 1 && report.OutOfScope == 1);
+    ref = Simulink.dictionary.archdata.open(referenceFile);
+    assert(isequal(string({getInterface(ref, 'Referenced').Elements.Name}), "Keep"));
+    assert(strcmp(getElement(getInterface(ref, 'Referenced'), 'Keep').Type.DataType, 'double'));
+    assert(~isDirty(ref));
+    close(ref);
+    dd = Simulink.dictionary.archdata.open(file);
+    assert(isscalar(getInterface(dd, 'OnlyInSldd').Elements));
+    assert(ismember('Empty', getInterfaceNames(dd)));
+    assert(strcmp(getElement(getInterface(dd, 'NewBus'), 'New').Type.DataType, 'uint16'));
+
+    % Preview retains an already open dictionary and all unsaved user edits.
+    bus = getInterface(dd, 'Bus');
+    addElement(bus, 'UserUnsaved');
+    [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
+    assert(isDirty(dd) && any(strcmp(report.Changes.Interface, 'Bus.UserUnsaved')));
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', 'apply'), ...
+        'InterfaceTools:DirtyDictionary');
+    assert(isDirty(dd) && numel(getInterface(dd, 'Bus').Elements) == 6);
+    discardChanges(dd);
+    close(dd);
+
+    % Native save/discard includes references; reject their pending edits too.
+    ref = Simulink.dictionary.archdata.open(referenceFile);
+    addElement(getInterface(ref, 'Referenced'), 'UserPending');
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', 'apply'), ...
+        'InterfaceTools:DirtyDictionary');
+    assert(isDirty(ref) && numel(getInterface(ref, 'Referenced').Elements) == 2);
+    discardChanges(ref);
+    close(ref);
+
+    % A late API error must roll back earlier successful additions as well.
+    before = local_bytes(file);
+    rows(end+1, :) = {'Bus', 'AValid', 'double', '1', '', ''};
+    rows(end+1, :) = {'Bus', 'ZInvalid', 'Bus: MissingType', '1', 'm/s', ''};
+    writecell(rows, source);
+    failed = false;
+    try
+        sync_bus_interfaces_from_excel(source, file, 'all', 'apply');
+    catch
+        failed = true;
+    end
+    assert(failed && isequal(before, local_bytes(file)));
+    dd = Simulink.dictionary.archdata.open(file);
+    assert(~any(strcmp({getInterface(dd, 'Bus').Elements.Name}, 'AValid')));
+    close(dd);
+    clear cleanup refCleanup;
+    fprintf('PASS: direct inventory, typed elements, references, dirty edits, rollback, no exporter.\n');
+end
+
+function local_expectError(action, identifier)
+    rejected = false;
+    try
+        action();
+    catch ME
+        rejected = strcmp(ME.identifier, identifier);
+    end
+    assert(rejected, 'Expected error: %s', identifier);
 end
 
 function local_write(file, contents)

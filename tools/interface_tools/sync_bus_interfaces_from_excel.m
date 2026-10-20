@@ -1,26 +1,24 @@
-function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, exportXlsxFile, mode)
-%SYNC_BUS_INTERFACES_FROM_EXCEL Compare 2 XLSX files before modifying SLDD.
-% Version: 1.5.0 (Interface tools bundle).
+function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
+%SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
+% Version: 1.6.0 (Interface tools bundle).
 %
-% MATLAB R2024b. Writes to ARCHITECTURAL DATA, never to Design Data.
+% Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
-% Standalone backend; requires only the project sldd2excel_main exporter.
+% summary.Interfaces inventories all Data Interfaces, including empty/referenced ones.
+% Standalone backend; no exporter or intermediate workbook is needed.
 %
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile)
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "HVBat")
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, ["HVBat","LVS"])
-%   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", exportXlsx)
-%   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", exportXlsx, "preview")
+%   summary = sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", "preview")
+%   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "HVBat", "apply")
+% Legacy (source, sldd, sheets, exportXlsx, mode) calls remain accepted;
+% the export path is ignored and never read, written, or deleted.
 %
-% Workflow:
-%   1) Run sldd2excel_main (must be on MATLAB path / callable with NO args).
-%   2) Read SOURCE XLSX: Bus, Element, DataType, Dim, Unit, Description.
-%   3) Read EXPORTED XLSX: BusElement sheet: Port, Element, DataType, etc.
-%   4) Compare (Bus, Element) pairs IN MEMORY; do not open SLDD yet.
-%   5) Only if there are additions/deletions: open Architectural Data ONCE,
-%      add missing elements and remove extra elements in the selected buses.
-%      No full interface deletion; no modifications to existing properties.
-%   6) Save only when changes were successfully applied.
+% Reads Bus, Element, DataType, Dim, Unit, Description from the source XLSX,
+% and every Data Interface from the specified SLDD and its references.
+% Service/Physical Interfaces and Design Data buses are excluded.
+% Compares in memory, then saves only successfully applied element changes.
 %
 % NOTES / SAFETY:
 %   - All valid source rows are included regardless of Status.
@@ -28,14 +26,13 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %     expected elements are collected from ALL source sheets, protecting
 %     elements shared across sheets from accidental deletion.
 %   - Buses absent from the selected sheets are NEVER deleted/changed.
+%     In all-sheet mode their elements are reported as REMOVE (report only).
+%   - Empty Data Interfaces are inventoried but never removed.
 %   - Referenced SLDD interfaces are NEVER changed by this function.
 %   - Differences in existing element DataType/Dim/Unit/Description are
 %     printed as warnings only; these do not trigger SLDD writes.
-%   - "preview" computes and prints the plan without opening SLDD for edits.
-%   - Export XLSX is deleted BEFORE running sldd2excel_main to avoid stale
-%     comparison; close that workbook in Excel beforehand.
-%   - sldd2excel_main must export the SAME dictionary passed as slddFile.
-%     If it takes arguments, adapt runSlddExporter() below accordingly.
+%   - "preview" never edits or saves the dictionary.
+%   - Apply refuses dictionaries with unsaved changes, protecting user edits.
 %
 % MathWorks references (API available since R2023b):
 %   https://www.mathworks.com/help/simulink/slref/adddatainterface.html
@@ -44,8 +41,12 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %   https://www.mathworks.com/help/simulink/slref/simulink.dictionary.archdata.dataelement.html
 %
     if nargin < 3 || isempty(selectedSheets), selectedSheets = "all"; end
-    if nargin < 4, exportXlsxFile = ""; end
+    if nargin < 4, modeOrLegacyExport = ""; end
     if nargin < 5 || isempty(mode), mode = "apply"; end
+    if nargin < 5 && isscalar(string(modeOrLegacyExport)) && ...
+            ismember(lower(string(modeOrLegacyExport)), ["apply", "preview"])
+        mode = modeOrLegacyExport;
+    end
 
     mode = lower(strtrim(string(mode)));
     if ~isscalar(mode) || ~ismember(mode, ["apply", "preview"])
@@ -53,55 +54,44 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.5.0\n');
+    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.6.0\n');
     fprintf('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
     slddFile = existingFullPath(slddFile, 'SLDD');
-    if strlength(string(exportXlsxFile)) == 0
-        exportXlsxFile = locateExportFile(slddFile);
-    else
-        exportXlsxFile = makeAbsolutePath(exportXlsxFile);
-    end
-    if strcmpi(xlsxFile, exportXlsxFile)
-        error('Source XLSX and export XLSX cannot be the same file.');
-    end
 
     sourceSheets = cellstr(sheetnames(xlsxFile));
     targetSheets = resolveSheets(selectedSheets, sourceSheets);
 
-    % Read expected rows before exporting; fail early on invalid source.
+    % Read expected rows first; fail early on invalid source.
     [expected, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets);
 
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
         'Added', 0, 'Removed', 0, 'NewInterfaces', 0, 'ReferencedSkipped', 0, ...
-        'Saved', false);
+        'OutOfScope', 0, 'Saved', false);
     summary.Changes = cell2table(cell(0, 5), 'VariableNames', ...
         {'Action', 'Interface', 'Property', 'SourceValue', 'TargetValue'});
-
-    if selectedBuses.Count == 0
-        fprintf('[NO SCOPE] No valid Bus/Element entries in selected sheets.\n');
-        return;
-    end
 
     fprintf('[SOURCE] %s\n', xlsxFile);
     fprintf('[SHEETS] %s\n', strjoin(targetSheets, ', '));
 
-    % Force freshly generated XLSX: never compare against yesterday's export.
-    fprintf('[EXPORT] Running sldd2excel_main ...\n');
-    if isfile(exportXlsxFile)
-        delete(exportXlsxFile);
+    wasOpen = any(strcmpi(Simulink.data.dictionary.getOpenDictionaryPaths(), slddFile));
+    archData = Simulink.dictionary.archdata.open(slddFile);
+    cleanup = onCleanup(@() local_closeDictionary(archData, wasOpen));
+    [actual, summary.Interfaces] = local_readDataInterfaces(archData);
+    fprintf('[SLDD] %s: %d Data Interfaces, %d elements\n', ...
+        slddFile, height(summary.Interfaces), actual.Count);
+    scope = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+    buses = keys(selectedBuses);
+    for i = 1:numel(buses), scope(buses{i}) = true; end
+    if numel(targetSheets) == numel(sourceSheets)
+        % Include dictionary-only buses in full comparisons, without expanding writes.
+        for i = 1:height(summary.Interfaces)
+            scope(summary.Interfaces.Name{i}) = true;
+        end
     end
-    runSlddExporter();
-    if ~isfile(exportXlsxFile)
-        error(['sldd2excel_main did not generate the expected output: %s\n' ...
-               'Pass the actual output path as the 4th argument if different.'], ...
-               exportXlsxFile);
-    end
-
-    actual = readExportWorkbook(exportXlsxFile);
-    [addKeys, removeKeys, metadataDiff, compared, changes] = compareWorkbooks(expected, actual, selectedBuses);
+    [addKeys, removeKeys, metadataDiff, compared, changes] = compareInterfaces(expected, actual, scope);
     summary.Changes = cell2table(changes, 'VariableNames', summary.Changes.Properties.VariableNames);
     summary.Changes = sortrows(summary.Changes, {'Action', 'Interface', 'Property'});
     summary.Compared = compared;
@@ -117,7 +107,18 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         fprintf('  [PROPERTY_DIFF] %s\n', metadataDiff{i});
     end
 
-    % IMPORTANT: zero SLDD edits/open calls when the XLSX keys match.
+    scopedRemovals = {};
+    for i = 1:numel(removeKeys)
+        if isKey(selectedBuses, getBusFromKey(removeKeys{i}))
+            scopedRemovals{end+1} = removeKeys{i}; %#ok<AGROW>
+        end
+    end
+    summary.OutOfScope = numel(removeKeys) - numel(scopedRemovals);
+    if summary.OutOfScope > 0
+        fprintf('[REPORT ONLY] %d removals belong to buses absent from selected sheets.\n', summary.OutOfScope);
+    end
+
+    % Matching keys and metadata-only differences never trigger writes.
     if isempty(addKeys) && isempty(removeKeys)
         fprintf('[UNCHANGED] No Bus/Element additions or deletions. SLDD untouched.\n');
         return;
@@ -127,7 +128,11 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         return;
     end
 
-    % Validate all pending additions before opening/mutating Architectural Data.
+    if isempty(addKeys) && isempty(scopedRemovals), return; end
+    checked = containers.Map('KeyType', 'char', 'ValueType', 'logical');
+    local_requireCleanDictionary(slddFile, checked);
+
+    % Validate all pending additions before mutating Architectural Data.
     for i = 1:numel(addKeys)
         rec = expected(addKeys{i});
         if isempty(rec.dataType)
@@ -137,13 +142,10 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         formatDimensionsForDataElement(rec.dimensions);
     end
 
-    % An incomplete/unrelated exporter output could otherwise delete many
-    % legitimate elements. Scope is always limited to source-selected buses.
-    archData = Simulink.dictionary.archdata.open(slddFile);
     try
         [summary.Added, summary.Removed, summary.NewInterfaces, ...
             summary.ReferencedSkipped] = applyDifferences(archData, ...
-            expected, addKeys, removeKeys);
+            expected, addKeys, scopedRemovals);
 
         if summary.Added > 0 || summary.Removed > 0
             save(archData);
@@ -152,11 +154,10 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         else
             fprintf('[UNCHANGED] No editable differences in target SLDD.\n');
         end
-        close(archData);
     catch ME
         % Do not save a partially modified dictionary on failure.
         try
-            close(archData, 'DiscardChanges', true);
+            discardChanges(archData);
         catch
         end
         rethrow(ME);
@@ -166,12 +167,24 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         summary.ReferencedSkipped);
 end
 
-function runSlddExporter()
-% Isolated helper: supports sldd2excel_main as a no-input script or function.
-% If your exporter requires input arguments, change ONLY the next line.
-    previousFolder = pwd;
-    restoreFolder = onCleanup(@() cd(previousFolder)); %#ok<NASGU>
-    sldd2excel_main;
+function local_closeDictionary(archData, wasOpen)
+    if ~wasOpen, close(archData); end
+end
+
+function local_requireCleanDictionary(file, checked)
+% Native save/discard includes references: protect pending edits in all of them.
+    dictionary = Simulink.data.dictionary.open(file);
+    if isKey(checked, dictionary.filepath), return; end
+    checked(dictionary.filepath) = true;
+    if dictionary.HasUnsavedChanges
+        error('InterfaceTools:DirtyDictionary', ...
+            'SLDD has unsaved changes: %s. Save or discard them before applying interface changes.', ...
+            dictionary.filepath);
+    end
+    references = dictionary.DataSources;
+    for i = 1:numel(references)
+        local_requireCleanDictionary(references{i}, checked);
+    end
 end
 
 function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets)
@@ -181,7 +194,7 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
     for i = 1:numel(sheets)
         sheet = sheets{i};
         raw = readcell(file, 'Sheet', sheet);
-        [headerRow, cols] = detectHeaders(raw, {'Bus', 'Element'}, false);
+        [headerRow, cols] = detectHeaders(raw, {'Bus', 'Element'});
         if headerRow == 0
             if ismember(sheet, selectedSheets) && numel(selectedSheets) < numel(sheets)
                 error('Selected sheet "%s" does not contain Bus/Element columns.', sheet);
@@ -225,53 +238,39 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
     end
 end
 
-function actual = readExportWorkbook(file)
+function [actual, inventory] = local_readDataInterfaces(archData)
     actual = containers.Map('KeyType', 'char', 'ValueType', 'any');
-    sheets = cellstr(sheetnames(file));
-    ix = find(strcmpi(sheets, 'BusElement'), 1);
-    if isempty(ix)
-        error('Exported XLSX has no BusElement sheet: %s', file);
-    end
-    raw = readcell(file, 'Sheet', sheets{ix});
-    [headerRow, cols] = detectHeaders(raw, {'Port', 'Element'}, true);
-    if headerRow == 0
-        error('Exported BusElement sheet does not contain Port/Element columns.');
-    end
-
-    previousBus = '';
-    for r = headerRow+1:size(raw, 1)
-        bus = getText(raw, r, cols.bus);
-        elem = getText(raw, r, cols.element);
-        rowType = getText(raw, r, cols.type);
-        if ~isempty(rowType) && ~strcmpi(rowType, 'BusElement')
-            continue;
+    rows = cell(0, 3);
+    names = sort(getInterfaceNames(archData));
+    localNames = getInterfaceNames(archData, 'LookInsideDictReferences', false);
+    for i = 1:numel(names)
+        interfaceObj = getInterface(archData, names{i});
+        if ~isa(interfaceObj, 'Simulink.dictionary.archdata.DataInterface'), continue; end
+        elements = interfaceObj.Elements;
+        rows(end+1, :) = {names{i}, numel(elements), ~ismember(names{i}, localNames)}; %#ok<AGROW>
+        for j = 1:numel(elements)
+            elementObj = elements(j);
+            typeObj = elementObj.Type;
+            if isa(typeObj, 'Simulink.dictionary.archdata.DataInterface') || ...
+                    isa(typeObj, 'Simulink.dictionary.archdata.StructType')
+                dataType = ['Bus: ' typeObj.Name];
+                unit = '';
+            else
+                dataType = char(typeObj.DataType);
+                unit = char(typeObj.Unit);
+            end
+            rec = struct('bus', names{i}, 'element', elementObj.Name, ...
+                'dataType', strtrim(dataType), ...
+                'dimensions', strtrim(char(elementObj.Dimensions)), ...
+                'unit', strtrim(unit), 'description', strtrim(char(elementObj.Description)), ...
+                'origin', names{i});
+            actual(pairKey(rec.bus, rec.element)) = rec;
         end
-        if ~isempty(bus), previousBus = bus; end
-        if isempty(bus) && ~isempty(elem), bus = previousBus; end
-        if isempty(bus) && isempty(elem), continue; end
-        if isempty(elem), continue; end
-        if ~isvarname(bus) || ~isvarname(elem)
-            error('Invalid Port/Element in exported BusElement row %d: %s / %s', ...
-                r, bus, elem);
-        end
-        rec = struct('bus', bus, 'element', elem, ...
-            'dataType', getText(raw, r, cols.datatype), ...
-            'dimensions', getText(raw, r, cols.dimensions), ...
-            'unit', getText(raw, r, cols.unit), ...
-            'description', getText(raw, r, cols.description), ...
-            'origin', sprintf('BusElement:%d', r));
-        k = pairKey(bus, elem);
-        if isKey(actual, k)
-            error('Duplicate exported interface element: %s.%s', bus, elem);
-        end
-        actual(k) = rec;
     end
-    if actual.Count == 0
-        fprintf('[EXPORT] No BusElements found. Comparison will only propose additions.\n');
-    end
+    inventory = cell2table(rows, 'VariableNames', {'Name', 'ElementCount', 'Referenced'});
 end
 
-function [addKeys, removeKeys, differences, compared, changes] = compareWorkbooks(expected, actual, scope)
+function [addKeys, removeKeys, differences, compared, changes] = compareInterfaces(expected, actual, scope)
     addKeys = {};
     removeKeys = {};
     differences = {};
@@ -309,9 +308,9 @@ function [addKeys, removeKeys, differences, compared, changes] = compareWorkbook
         end
     end
 
-    exportKeys = sort(keys(actual));
-    for i = 1:numel(exportKeys)
-        k = exportKeys{i};
+    actualKeys = sort(keys(actual));
+    for i = 1:numel(actualKeys)
+        k = actualKeys{i};
         x = actual(k);
         if isKey(scope, x.bus) && ~isKey(expected, k)
             removeKeys{end+1} = k; %#ok<AGROW>
@@ -355,9 +354,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
             continue;
         else
             if isempty(busAdd)
-                % Could be stale exporter output; do not create bus just to delete.
-                warning('Export lists %s, but it is not present locally. Skipping removals.', bus);
-                continue;
+                error('InterfaceTools:MissingInterface', 'Data Interface %s disappeared during sync.', bus);
             end
             interfaceObj = addDataInterface(archData, bus);
             newInterfaces = newInterfaces + 1;
@@ -373,7 +370,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
                     row.bus, row.element, row.origin);
             end
             if any(strcmp(string({interfaceObj.Elements.Name}), row.element))
-                error('Exporter mismatch: %s.%s already exists in SLDD.', bus, row.element);
+                error('Dictionary mismatch: %s.%s already exists in SLDD.', bus, row.element);
             end
             % Important: DataElement.Dimensions expects char, NOT a double.
             % Do not assign a numeric vector to elementObj.Type.Dimensions.
@@ -390,7 +387,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
         for i = 1:numel(busRemove)
             elemName = getElementFromKey(busRemove{i});
             if ~any(strcmp(string({interfaceObj.Elements.Name}), elemName))
-                error('Exporter mismatch: %s.%s not found in target SLDD.', bus, elemName);
+                error('Dictionary mismatch: %s.%s not found in target SLDD.', bus, elemName);
             end
             removeElement(interfaceObj, elemName);
             removed = removed + 1;
@@ -432,10 +429,10 @@ function printChanges(tag, changeKeys, inventory, limit)
     end
 end
 
-function [headerRow, cols] = detectHeaders(raw, required, isExport)
+function [headerRow, cols] = detectHeaders(raw, required)
     headerRow = 0;
     cols = struct('bus', [], 'element', [], 'datatype', [], ...
-        'dimensions', [], 'unit', [], 'description', [], 'type', []);
+        'dimensions', [], 'unit', [], 'description', []);
     for r = 1:min(40, size(raw, 1))
         headers = strings(1, size(raw, 2));
         for c = 1:size(raw, 2)
@@ -450,17 +447,12 @@ function [headerRow, cols] = detectHeaders(raw, required, isExport)
         end
         if ~ok, continue; end
         headerRow = r;
-        if isExport
-            cols.bus = find(headers == "port", 1);
-        else
-            cols.bus = find(headers == "bus", 1);
-        end
+        cols.bus = find(headers == "bus", 1);
         cols.element = find(headers == "element", 1);
         cols.datatype = pickCol(headers, ["datatype", "datatypeelement"]);
         cols.dimensions = pickCol(headers, ["dim", "dimension", "dimensions"]);
         cols.unit = pickCol(headers, ["unit", "units"]);
         cols.description = pickCol(headers, "description");
-        cols.type = pickCol(headers, "type");
         return;
     end
 end
@@ -543,40 +535,4 @@ function out = existingFullPath(file, label)
     [ok, info] = fileattrib(file);
     if ~ok, error('Cannot resolve path: %s', file); end
     out = info.Name;
-end
-
-function out = makeAbsolutePath(path)
-    path = char(string(path));
-    if ispc
-        absolute = ~isempty(regexp(path, '^([A-Za-z]:[\\/]|\\\\)', 'once'));
-    else
-        absolute = startsWith(path, '/');
-    end
-    if absolute, out = path; else, out = fullfile(pwd, path); end
-end
-
-function exported = locateExportFile(slddFile)
-% Recognize EBUS_12M project root whether MATLAB starts in it or beside it.
-    subpath = fullfile('06_Tool', 'interface_tools', 'common');
-    roots = {pwd, fileparts(slddFile)};
-    for i = 1:numel(roots)
-        folder = roots{i};
-        for level = 1:12
-            c1 = fullfile(folder, subpath);
-            c2 = fullfile(folder, 'EBUS_12M', subpath);
-            if isfolder(c1)
-                exported = fullfile(c1, 'sldd_interface_export.xlsx');
-                return;
-            end
-            if isfolder(c2)
-                exported = fullfile(c2, 'sldd_interface_export.xlsx');
-                return;
-            end
-            parent = fileparts(folder);
-            if strcmp(parent, folder), break; end
-            folder = parent;
-        end
-    end
-    error(['Cannot locate EBUS_12M/06_Tool/interface_tools/common. ' ...
-           'Specify exportXlsxFile as the 4th argument.']);
 end

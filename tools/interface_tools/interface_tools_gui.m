@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.5.0 (Interface tools bundle).
+% Version: 1.6.0 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -12,8 +12,8 @@ function fig = interface_tools_gui(opts)
 % Existing property differences are reported only, never applied.
 %
 % Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
-% SLDD operations additionally require the project's sldd2excel_main exporter
-% on the MATLAB path or beside ExportXlsx. No other repository helpers needed.
+% SLDD operations read Data Interfaces directly from Architectural Data.
+% No exporter or intermediate workbook is needed.
 
     if nargin < 1, opts = struct(); end
     validateattributes(opts, {'struct'}, {'scalar'});
@@ -26,7 +26,6 @@ function fig = interface_tools_gui(opts)
     projectRoot = '';
     slddFile = '';
     parametersFile = '';
-    exportedFile = '';
     knownSheets = strings(1, 0);
     logLines = {'Ready. Choose an Excel workbook.'};
 
@@ -114,7 +113,6 @@ function fig = interface_tools_gui(opts)
         projectRoot = '';
         slddFile = '';
         parametersFile = '';
-        exportedFile = '';
         knownSheets = strings(1, 0);
         sheetList.Items = {};
         sheetList.Value = {};
@@ -130,7 +128,7 @@ function fig = interface_tools_gui(opts)
             return;
         end
 
-        % Normalize relative XLSX paths before Sync temporarily changes pwd.
+        % Normalize relative XLSX paths before calling the backends.
         [resolved, info] = fileattrib(source);
         if resolved
             source = info.Name;
@@ -147,7 +145,6 @@ function fig = interface_tools_gui(opts)
                 end
             end
             parametersFile = local_resolvePath(config.ParametersFile, projectRoot);
-            exportedFile = local_resolvePath(config.ExportXlsx, projectRoot);
             slddFile = findProjectSldd(projectRoot, config.SlddFile);
 
             projectLabel.Text = projectRoot;
@@ -252,22 +249,6 @@ function fig = interface_tools_gui(opts)
                     'SLDD not found');
                 return;
             end
-            if ~isfolder(fileparts(exportedFile))
-                uialert(fig, sprintf('SLDD exporter folder does not exist:\n%s', ...
-                    fileparts(exportedFile)), 'Missing exporter folder');
-                return;
-            end
-            if exist('sldd2excel_main', 'file') ~= 2
-                commonFolder = fileparts(exportedFile);
-                if isfile(fullfile(commonFolder, 'sldd2excel_main.m'))
-                    addpath(commonFolder);
-                end
-            end
-            if exist('sldd2excel_main', 'file') ~= 2
-                uialert(fig, 'sldd2excel_main.m must be on the MATLAB path.', ...
-                    'Exporter not found');
-                return;
-            end
         end
         if doParams && ~isfolder(fileparts(parametersFile))
             uialert(fig, sprintf('Parameter output folder does not exist:\n%s', fileparts(parametersFile)), ...
@@ -306,16 +287,14 @@ function fig = interface_tools_gui(opts)
                 end
                 appendLog(sprintf('SLDD %s: %d model(s)', mode, numel(selected)));
                 drawnow;
-                % Exporter can rely on relative project paths: run from root.
-                currentFolder = pwd;
-                restoreFolder = onCleanup(@() cd(currentFolder));
-                cd(projectRoot);
-                summary = sync_bus_interfaces_from_excel( ...
-                    source, slddFile, selected, exportedFile, mode);
-                clear restoreFolder; % Restore cwd before updating the GUI.
+                requested = selected;
+                if numel(selected) == numel(knownSheets), requested = 'all'; end
+                summary = sync_bus_interfaces_from_excel(source, slddFile, requested, mode);
                 detailTable.Data = table2cell(summary.Changes);
                 detailLabel.Text = sprintf('SLDD differences: %d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
                     summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
+                appendLog(sprintf('%d Data Interfaces read directly from SLDD; %d removals report only.', ...
+                    height(summary.Interfaces), summary.OutOfScope));
                 appendLog(sprintf('SLDD: ADD=%d REMOVE=%d PROPERTY_DIFF=%d SAVED=%d', ...
                     summary.ToAdd, summary.ToRemove, ...
                     summary.MetadataMismatch, summary.Saved));
@@ -410,9 +389,10 @@ function config = local_readConfig(configFile)
     configFolder = fileparts(info.Name);
     config = jsondecode(fileread(configFile));
     names = {'SourceXlsx', 'ProjectRoot', 'ProjectFolderName', 'ArchitectureFolder', ...
-        'SlddFile', 'ParametersFile', 'ExportXlsx'};
+        'SlddFile', 'ParametersFile'};
+    allowed = [names, {'ExportXlsx'}]; % Accept legacy configs; export path is unused.
     if ~isstruct(config) || ~isscalar(config) || ...
-            ~all(isfield(config, names)) || ~all(ismember(fieldnames(config), names))
+            ~all(isfield(config, names)) || ~all(ismember(fieldnames(config), allowed))
         error('InterfaceTools:Config', 'Config must contain exactly: %s.', strjoin(names, ', '));
     end
     for k = 1:numel(names)
