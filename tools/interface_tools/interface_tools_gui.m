@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.6.0 (Interface tools bundle).
+% Version: 1.7.0 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -9,7 +9,9 @@ function fig = interface_tools_gui(opts)
 % ProjectRoot (or absolute). Empty ProjectRoot enables project discovery.
 % Sheets affect SLDD only; parameter generation always processes ALL sheets.
 % Preview lists every ADD/REMOVE/PROPERTY_DIFF as bus.element in a table.
-% Existing property differences are reported only, never applied.
+% Tick individual ADD/REMOVE rows, then Apply selected. Preview is required.
+% Property differences and referenced interfaces cannot be selected.
+% Only buses named in selected Excel sheets are compared.
 %
 % Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
 % SLDD operations read Data Interfaces directly from Architectural Data.
@@ -27,11 +29,12 @@ function fig = interface_tools_gui(opts)
     slddFile = '';
     parametersFile = '';
     knownSheets = strings(1, 0);
+    previewReport = [];
     logLines = {'Ready. Choose an Excel workbook.'};
 
     fig = uifigure('Name', 'CVC Interface Tools', ...
         'Position', [180 80 980 760], 'Color', [0.97 0.98 0.99]);
-    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 224, 20, '1x', 90}, ...
+    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 224, 28, '1x', 90}, ...
         'Padding', [16 12 16 12], 'RowSpacing', 8);
     uilabel(layout, 'Text', 'CVC Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
     sourceGrid = uigridlayout(layout, [2 3], 'RowHeight', {30, 22}, ...
@@ -79,17 +82,26 @@ function fig = interface_tools_gui(opts)
         'ButtonPushedFcn', @(~, ~) clearSheets());
     previewButton = uibutton(sg, 'push', 'Text', 'Preview differences', 'Tag', 'PreviewSldd', ...
         'ButtonPushedFcn', @(~, ~) runTasks('preview'));
-    syncButton = uibutton(sg, 'push', 'Text', 'Sync SLDD (Add / Remove)', 'Tag', 'SyncSldd', ...
+    syncButton = uibutton(sg, 'push', 'Text', 'Apply selected (0)', 'Tag', 'SyncSldd', 'Enable', 'off', ...
         'ButtonPushedFcn', @(~, ~) runTasks('sync'));
     actionButtons = [previewButton, syncButton, parameterButton];
     inputControls = [excelEdit, browseButton, sheetList, selectButton, clearButton];
 
-    detailLabel = uilabel(layout, 'Text', 'SLDD differences: run Preview to compare.', ...
+    detailHeader = uigridlayout(layout, [1 3], ...
+        'ColumnWidth', {'1x', 130, 110}, 'Padding', [0 0 0 0]);
+    detailLabel = uilabel(detailHeader, 'Text', 'Run Preview, then tick changes to apply.', ...
         'FontWeight', 'bold');
+    selectChangesButton = uibutton(detailHeader, 'Text', 'Select all changes', 'Tag', 'SelectChanges', ...
+        'ButtonPushedFcn', @(~, ~) selectChanges(true));
+    clearChangesButton = uibutton(detailHeader, 'Text', 'Clear changes', 'Tag', 'ClearChanges', ...
+        'ButtonPushedFcn', @(~, ~) selectChanges(false));
     detailTable = uitable(layout, 'Tag', 'InterfaceDifferences', ...
-        'Data', cell(0, 5), 'ColumnName', {'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
-        'ColumnWidth', {130, 220, 100, 'auto', 'auto'}, 'RowName', {}, ...
-        'ColumnEditable', false);
+        'Data', cell(0, 6), 'ColumnName', {'Apply', 'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
+        'ColumnFormat', {'logical', 'char', 'char', 'char', 'char', 'char'}, ...
+        'ColumnWidth', {50, 110, 220, 90, 'auto', 'auto'}, 'RowName', {}, ...
+        'ColumnEditable', [true false false false false false], ...
+        'CellEditCallback', @(~, event) editChange(event));
+    inputControls = [inputControls, selectChangesButton, clearChangesButton, detailTable];
     logArea = uitextarea(layout, 'Editable', 'off', 'Value', logLines);
     if ~isempty(config.SourceXlsx)
         excelEdit.Value = config.SourceXlsx;
@@ -119,7 +131,7 @@ function fig = interface_tools_gui(opts)
         projectLabel.Text = 'Automatic project discovery';
         slddLabel.Text = config.SlddFile;
         parametersLabel.Text = config.ParametersFile;
-        detailTable.Data = cell(0, 5);
+        resetPreview();
         detailLabel.Text = 'SLDD differences: run Preview to compare.';
         sheetCountLabel.Text = 'No sheets loaded';
         if isempty(source), return; end
@@ -215,7 +227,7 @@ function fig = interface_tools_gui(opts)
     function updateSelectionCount()
         sheetCountLabel.Text = sprintf('%d / %d model(s) selected for SLDD sync', ...
             numel(sheetList.Value), numel(knownSheets));
-        detailTable.Data = cell(0, 5);
+        resetPreview();
         detailLabel.Text = 'SLDD differences: selection changed. Run Preview to compare.';
     end
 
@@ -256,14 +268,19 @@ function fig = interface_tools_gui(opts)
             return;
         end
         if doApply
-            choice = uiconfirm(fig, sprintf([ ...
-                'Sync can ADD/REMOVE Architectural Data elements.\n\n' ...
-                'SLDD: %s\nModels: %s\n\nContinue?'], ...
-                slddFile, strjoin(selected, ', ')), ...
-                'Confirm SLDD sync', 'Icon', 'warning', ...
-                'Options', {'Sync', 'Cancel'}, ...
-                'DefaultOption', 2, 'CancelOption', 2);
-            if ~strcmp(choice, 'Sync'), return; end
+            if isempty(previewReport)
+                appendLog('Run Preview and tick ADD/REMOVE rows before applying.');
+                return;
+            end
+            chosen = cell2mat(detailTable.Data(:, 1));
+            chosen = chosen & previewReport.Selectable;
+            if ~any(chosen)
+                appendLog('No editable changes selected.');
+                return;
+            end
+            applyOptions = struct('Mode', 'apply', ...
+                'SelectedChanges', previewReport.Changes(chosen, :), ...
+                'ExpectedSnapshot', {previewReport.Snapshot});
         end
         if doParams && isfile(parametersFile)
             choice = uiconfirm(fig, ...
@@ -278,26 +295,25 @@ function fig = interface_tools_gui(opts)
         restoreButtons = onCleanup(@() enableActions('on'));
         try
             if doSync
-                detailTable.Data = cell(0, 5);
-                detailLabel.Text = 'SLDD differences: comparing...';
-                if strcmp(task, 'preview')
-                    mode = 'preview';
-                else
-                    mode = 'apply';
-                end
-                appendLog(sprintf('SLDD %s: %d model(s)', mode, numel(selected)));
-                drawnow;
                 requested = selected;
                 if numel(selected) == numel(knownSheets), requested = 'all'; end
-                summary = sync_bus_interfaces_from_excel(source, slddFile, requested, mode);
-                detailTable.Data = table2cell(summary.Changes);
-                detailLabel.Text = sprintf('SLDD differences: %d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
-                    summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
-                appendLog(sprintf('%d Data Interfaces read directly from SLDD; %d removals report only.', ...
-                    height(summary.Interfaces), summary.OutOfScope));
-                appendLog(sprintf('SLDD: ADD=%d REMOVE=%d PROPERTY_DIFF=%d SAVED=%d', ...
-                    summary.ToAdd, summary.ToRemove, ...
-                    summary.MetadataMismatch, summary.Saved));
+                if doApply
+                    appendLog(sprintf('Applying %d selected element changes ...', sum(chosen)));
+                    summary = sync_bus_interfaces_from_excel(source, slddFile, requested, applyOptions);
+                    appendLog(sprintf('Applied: ADD=%d REMOVE=%d SAVED=%d', ...
+                        summary.Added, summary.Removed, summary.Saved));
+                end
+                resetPreview();
+                detailLabel.Text = 'Comparing Excel buses with SLDD ...';
+                drawnow;
+                previewReport = sync_bus_interfaces_from_excel(source, slddFile, requested, 'preview');
+                detailTable.Data = [num2cell(false(height(previewReport.Changes), 1)), ...
+                    table2cell(previewReport.Changes)];
+                detailLabel.Text = sprintf('%d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
+                    previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch);
+                updateApplyState();
+                appendLog(sprintf('%d matching Data Interfaces; tick local ADD/REMOVE rows to apply.', ...
+                    height(previewReport.Interfaces)));
             end
             if doParams
                 appendLog('Generating ALL parameter sheets ...');
@@ -308,7 +324,10 @@ function fig = interface_tools_gui(opts)
             end
             appendLog('Finished successfully.');
         catch ME
-            if doSync, detailLabel.Text = 'SLDD comparison failed. See activity log.'; end
+            if doSync
+                resetPreview();
+                detailLabel.Text = 'Run Preview again. See activity log.';
+            end
             appendLog('ERROR: ' + string(ME.message));
             fprintf(2, '\n%s\n', getReport(ME, 'extended', 'hyperlinks', 'off'));
             uialert(fig, ME.message, 'Tool failed', 'Icon', 'error');
@@ -321,6 +340,39 @@ function fig = interface_tools_gui(opts)
         for k = 1:numel(controls)
             controls(k).Enable = state;
         end
+        if strcmp(state, 'on'), updateApplyState(); end
+    end
+
+    function resetPreview()
+        previewReport = [];
+        detailTable.Data = cell(0, 6);
+        syncButton.Enable = 'off';
+        syncButton.Text = 'Apply selected (0)';
+    end
+
+    function editChange(event)
+        if isempty(previewReport), return; end
+        row = event.Indices(1);
+        if event.Indices(2) ~= 1, return; end
+        detailTable.Data{row, 1} = logical(event.NewData) && previewReport.Selectable(row);
+        updateApplyState();
+    end
+
+    function selectChanges(selected)
+        if isempty(previewReport), return; end
+        detailTable.Data(:, 1) = num2cell(previewReport.Selectable & selected);
+        updateApplyState();
+    end
+
+    function updateApplyState()
+        count = 0;
+        if ~isempty(previewReport)
+            chosen = cell2mat(detailTable.Data(:, 1));
+            count = sum(chosen & previewReport.Selectable);
+        end
+        syncButton.Text = sprintf('Apply selected (%d)', count);
+        syncButton.Enable = 'off';
+        if count > 0, syncButton.Enable = 'on'; end
     end
 
     function appendLog(message)

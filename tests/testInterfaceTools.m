@@ -7,7 +7,7 @@ function testInterfaceTools()
     previousFolder = pwd;
     sandbox = tempname;
     mkdir(sandbox);
-    restore = onCleanup(@() local_restore(previousPath, previousFolder));
+    restore = onCleanup(@() local_restore(previousPath, previousFolder, sandbox));
     addpath(toolFolder);
     addpath(sandbox, '-begin');
     cd(sandbox);
@@ -71,8 +71,35 @@ function testInterfaceTools()
     button.ButtonPushedFcn(button, []);
     details = findall(fig, 'Tag', 'InterfaceDifferences');
     assert(size(details.Data, 1) == 61);
-    assert(any(strcmp(details.Data(:, 2), 'BusA.New35')));
+    assert(any(strcmp(details.Data(:, 3), 'BusA.New35')));
     assert(isequal(before, local_bytes(dictionary)));
+    applyButton = findall(fig, 'Tag', 'SyncSldd');
+    assert(strcmp(applyButton.Enable, 'off') && ~any(cell2mat(details.Data(:, 1))));
+    selectChanges = findall(fig, 'Tag', 'SelectChanges');
+    selectChanges.ButtonPushedFcn(selectChanges, []);
+    assert(sum(cell2mat(details.Data(:, 1))) == 36);
+    clearChanges = findall(fig, 'Tag', 'ClearChanges');
+    clearChanges.ButtonPushedFcn(clearChanges, []);
+    assert(strcmp(applyButton.Enable, 'off'));
+    propertyRow = find(strcmp(details.Data(:, 2), 'PROPERTY_DIFF'), 1);
+    details.CellEditCallback(details, struct('Indices', [propertyRow 1], 'NewData', true));
+    assert(~details.Data{propertyRow, 1});
+    addRow = find(strcmp(details.Data(:, 3), 'BusA.New01'), 1);
+    removeRow = find(strcmp(details.Data(:, 3), 'BusA.Old'), 1);
+    details.CellEditCallback(details, struct('Indices', [addRow 1], 'NewData', true));
+    details.CellEditCallback(details, struct('Indices', [removeRow 1], 'NewData', true));
+    assert(strcmp(applyButton.Enable, 'on') && contains(applyButton.Text, '(2)'));
+    exportapp(fig, fullfile(sandbox, 'gui-selected.png'));
+    applyButton.ButtonPushedFcn(applyButton, []);
+    assert(size(details.Data, 1) == 59 && strcmp(applyButton.Enable, 'off'));
+    dd = Simulink.dictionary.archdata.open(dictionary);
+    bus = getInterface(dd, 'BusA');
+    assert(any(strcmp({bus.Elements.Name}, 'New01')) && ~any(strcmp({bus.Elements.Name}, 'New02')));
+    assert(~any(strcmp({bus.Elements.Name}, 'Old')));
+    close(dd);
+    sheets.Value = {'ModelB'};
+    sheets.ValueChangedFcn(sheets, []);
+    assert(isempty(details.Data) && strcmp(applyButton.Enable, 'off'));
     assert(isempty(findall(fig, 'Text', 'Sync + Generate ALL sheets')));
     button = findall(fig, 'Tag', 'GenerateParameters');
     button.ButtonPushedFcn(button, []);
@@ -88,7 +115,7 @@ function testInterfaceTools()
     clear figCleanup;
 
     summary = sync_bus_interfaces_from_excel('source.xlsx', dictionary, 'ModelA', 'export.xlsx', 'apply');
-    assert(summary.Added == 35 && summary.Removed == 1 && summary.Saved);
+    assert(summary.Added == 34 && summary.Removed == 0 && summary.Saved);
     dd = Simulink.dictionary.archdata.open(dictionary);
     bus = getInterface(dd, 'BusA');
     names = string({bus.Elements.Name});
@@ -122,7 +149,7 @@ function testInterfaceTools()
     button = findall(fig, 'Tag', 'PreviewSldd');
     button.ButtonPushedFcn(button, []);
     details = findall(fig, 'Tag', 'InterfaceDifferences');
-    assert(isempty(details.Data) && size(details.Data, 2) == 5);
+    assert(isempty(details.Data) && size(details.Data, 2) == 6);
     clear figCleanup;
     config.SourceXlsx = 1;
     local_write(configFile, jsonencode(config));
@@ -134,6 +161,7 @@ function testInterfaceTools()
     end
     assert(rejected, 'Invalid config must fail before creating a GUI.');
     local_testDirectSnapshot(sandbox);
+    local_testSelectedChanges(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
 end
@@ -201,15 +229,17 @@ function local_testDirectSnapshot(sandbox)
         'NewBus', 'New', 'uint16', '2', '', ''};
     writecell(rows, source);
     [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
-    assert(report.ToAdd == 2 && report.ToRemove == 1 && report.MetadataMismatch == 1);
-    assert(report.OutOfScope == 1 && height(report.Interfaces) == 5);
-    assert(ismember('Empty', report.Interfaces.Name));
+    assert(report.ToAdd == 2 && report.ToRemove == 0 && report.MetadataMismatch == 1);
+    assert(report.OutOfScope == 0 && height(report.Interfaces) == 3);
+    assert(~any(ismember({'Empty', 'OnlyInSldd'}, report.Interfaces.Name)));
+    assert(~any(startsWith(report.Changes.Interface, 'OnlyInSldd.')));
     assert(~any(ismember({'Service', 'Physical', 'DesignBus'}, report.Interfaces.Name)));
     assert(report.Interfaces.Referenced(strcmp(report.Interfaces.Name, 'Referenced')));
+    assert(~any(report.Selectable(startsWith(report.Changes.Interface, 'Referenced.'))));
     assert(isequal(before, local_bytes(file)) && isequal(refBefore, local_bytes(referenceFile)));
     report = sync_bus_interfaces_from_excel(source, file, 'all', 'apply');
     assert(report.Added == 1 && report.NewInterfaces == 1 && report.Removed == 0);
-    assert(report.Saved && report.ReferencedSkipped == 1 && report.OutOfScope == 1);
+    assert(report.Saved && report.ReferencedSkipped == 1 && report.OutOfScope == 0);
     ref = Simulink.dictionary.archdata.open(referenceFile);
     assert(isequal(string({getInterface(ref, 'Referenced').Elements.Name}), "Keep"));
     assert(strcmp(getElement(getInterface(ref, 'Referenced'), 'Keep').Type.DataType, 'double'));
@@ -259,6 +289,74 @@ function local_testDirectSnapshot(sandbox)
     fprintf('PASS: direct inventory, typed elements, references, dirty edits, rollback, no exporter.\n');
 end
 
+function local_testSelectedChanges(sandbox)
+    file = fullfile(sandbox, 'selected.sldd');
+    dd = Simulink.dictionary.archdata.create(file);
+    cleanup = onCleanup(@() local_close(dd));
+    bus = addDataInterface(dd, 'Selected');
+    addElement(bus, 'RemoveA');
+    addElement(bus, 'RemoveB');
+    addElement(bus, 'Keep');
+    save(dd);
+    close(dd);
+    source = fullfile(sandbox, 'selected.xlsx');
+    rows = {'Bus', 'Element', 'DataType'; 'Selected', 'Keep', 'uint8'; ...
+        'Selected', 'AddA', 'double'; 'Selected', 'AddB', 'single'};
+    writecell(rows, source);
+    [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
+    assert(report.ToAdd == 2 && report.ToRemove == 2 && report.MetadataMismatch == 1);
+    chosen = ismember(report.Changes.Interface, {'Selected.AddA', 'Selected.RemoveA'});
+    opts = struct('Mode', 'apply', 'SelectedChanges', report.Changes(chosen, :), ...
+        'ExpectedSnapshot', {report.Snapshot});
+    empty = opts;
+    empty.SelectedChanges = report.Changes([], :);
+    before = local_bytes(file);
+    result = sync_bus_interfaces_from_excel(source, file, 'all', empty);
+    assert(~result.Saved && isequal(before, local_bytes(file)));
+    invalid = opts;
+    invalid.SelectedChanges = report.Changes(strcmp(report.Changes.Action, 'PROPERTY_DIFF'), :);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', invalid), ...
+        'InterfaceTools:Selection');
+    invalid.SelectedChanges = table({'ADD'}, {'OtherBus.New'}, 'VariableNames', {'Action', 'Interface'});
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', invalid), ...
+        'InterfaceTools:Selection');
+    % A changed type on a pending addition must invalidate an old selection.
+    rows{3, 3} = 'uint16';
+    writecell(rows, source);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), ...
+        'InterfaceTools:StalePreview');
+    assert(isequal(before, local_bytes(file)));
+    rows{3, 3} = 'double';
+    writecell(rows, source);
+    dd = Simulink.dictionary.archdata.open(file);
+    element = getElement(getInterface(dd, 'Selected'), 'Keep');
+    element.Type.DataType = 'single';
+    save(dd);
+    close(dd);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), ...
+        'InterfaceTools:StalePreview');
+    dd = Simulink.dictionary.archdata.open(file);
+    element = getElement(getInterface(dd, 'Selected'), 'Keep');
+    element.Type.DataType = 'double';
+    save(dd);
+    close(dd);
+    result = sync_bus_interfaces_from_excel(source, file, 'all', opts);
+    assert(result.Added == 1 && result.Removed == 1 && result.Saved);
+    dd = Simulink.dictionary.archdata.open(file);
+    names = string({getInterface(dd, 'Selected').Elements.Name});
+    assert(all(ismember(["Keep", "AddA", "RemoveB"], names)));
+    assert(~any(ismember(["AddB", "RemoveA"], names)));
+    assert(strcmp(getElement(getInterface(dd, 'Selected'), 'Keep').Type.DataType, 'double'));
+    close(dd);
+    % An Excel bus absent from SLDD yields additions and a typed empty inventory.
+    missing = fullfile(sandbox, 'missing.xlsx');
+    writecell({'Bus', 'Element', 'DataType'; 'NewBus', 'New', 'double'}, missing);
+    [~, report] = evalc('sync_bus_interfaces_from_excel(missing, file, "all", "preview")');
+    assert(report.ToAdd == 1 && isempty(report.Interfaces));
+    clear cleanup;
+    fprintf('PASS: selected changes, empty/invalid selections, stale preview, Excel-only scope.\n');
+end
+
 function local_expectError(action, identifier)
     rejected = false;
     try
@@ -288,7 +386,15 @@ function local_close(dd)
     end
 end
 
-function local_restore(previousPath, previousFolder)
+function local_restore(previousPath, previousFolder, sandbox)
+    openFiles = Simulink.data.dictionary.getOpenDictionaryPaths();
+    for k = 1:numel(openFiles)
+        if startsWith(openFiles{k}, [sandbox filesep], 'IgnoreCase', ispc)
+            dictionary = Simulink.data.dictionary.open(openFiles{k});
+            discardChanges(dictionary);
+            close(dictionary);
+        end
+    end
     cd(previousFolder);
     path(previousPath);
     clear sldd2excel_main;

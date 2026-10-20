@@ -24,7 +24,7 @@
 | **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
-| **Interface tools** | `1.6.0` | Compares Excel directly with SLDD Data Interfaces; previews every `bus.element` difference, syncs selected interfaces, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
+| **Interface tools** | `1.7.0` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element additions/removals to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
 
@@ -98,30 +98,40 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 | Panel | Behavior |
 | --- | --- |
 | **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting the output. |
-| **SLDD interfaces** | Preview lists every `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`, with XLSX/SLDD property values. Sync confirms before applying additions/removals for selected sheets. Existing property differences remain report-only. |
+| **SLDD interfaces** | Preview compares Excel buses and lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick the local additions/removals you want, then click **Apply selected**. Property differences and referenced interfaces are report-only. |
 
-Preview reads **all Data Interfaces in Architectural Data**, including referenced
-and empty interfaces, directly from the configured SLDD. Service/Physical
-Interfaces and buses in Design Data are excluded. No `sldd2excel_main` or
-intermediate Excel workbook is needed.
+Preview reads **Data Interfaces in Architectural Data** directly from the
+configured SLDD. Only buses named in the selected Excel sheets are compared;
+other SLDD buses are ignored. For those buses, expected elements come from all
+workbook sheets to protect shared elements. Service/Physical Interfaces and
+buses in Design Data are excluded. No exporter or intermediate Excel is needed.
 
-With all sheets selected, comparison includes SLDD-only elements. With a subset,
-it compares buses named in those sheets, collecting their expected elements from
-all workbook sheets to protect shared elements. Sync only changes local buses
-named in selected sheets; SLDD-only buses and references remain report-only.
-Empty interfaces are retained. Apply refuses pending edits in the dictionary or its references.
+Run **Preview differences**, tick individual **Apply** checkboxes, then click
+**Apply selected**. Checkboxes start cleared; **Select all changes** selects only
+editable local ADD/REMOVE rows. Existing property differences and referenced
+interfaces cannot be selected. The table refreshes after Apply and clears the
+selection. Changing the workbook/sheets clears the preview. If compared data
+changes after Preview, run Preview again before applying.
 
 ```matlab
-summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');
-% Review summary.Changes, then apply additions/removals:
-summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'apply');
+preview = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');
+% Select the rows to add/remove (indices into preview.Changes):
+rows = find(preview.Selectable); % Replace with the rows you want.
+opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes(rows, :), ...
+    'ExpectedSnapshot', {preview.Snapshot});
+summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', opts);
 ```
 
-`summary.Changes` contains the complete differences table. `summary.Interfaces`
-lists each Data Interface's name, element count, and reference status;
-`summary.OutOfScope` counts report-only removals outside selected buses.
-Preview never edits or saves the SLDD. Existing property differences remain
-report-only. Legacy five-argument calls and configs with `ExportXlsx` are accepted;
+`summary.Changes` contains the complete differences table; `summary.Selectable`
+marks editable rows. `summary.Interfaces` lists matching Data Interfaces with
+name, element count, and reference status. `summary.SelectedAdd/SelectedRemove`
+count the selected changes; `Added/Removed` count changes actually applied.
+An empty `SelectedChanges` table applies nothing. CLI calls without this option
+retain apply-all behavior; `opts.Mode` defaults to preview.
+
+Preview never edits or saves the SLDD. Apply protects pending edits in the
+dictionary and its references, keeps empty interfaces, and rolls back failed
+changes. Legacy five-argument calls and configs with `ExportXlsx` are accepted;
 the export path is ignored and never read, written, or deleted.
 
 ## Versioning

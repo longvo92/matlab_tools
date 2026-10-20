@@ -1,10 +1,11 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.6.0 (Interface tools bundle).
+% Version: 1.7.0 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
-% summary.Interfaces inventories all Data Interfaces, including empty/referenced ones.
+% summary.Interfaces inventories Data Interfaces in the selected Excel buses only.
+% summary.Selectable marks editable ADD/REMOVE rows in summary.Changes.
 % Standalone backend; no exporter or intermediate workbook is needed.
 %
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile)
@@ -12,11 +13,17 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, ["HVBat","LVS"])
 %   summary = sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", "preview")
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "HVBat", "apply")
+%   opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes(rows, :), ...
+%       'ExpectedSnapshot', {preview.Snapshot});
+%   summary = sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", opts)
+% opts.Mode defaults to preview. SelectedChanges is an Action/Interface table;
+% an empty selection applies nothing. Omit it to retain legacy apply-all behavior.
+% ExpectedSnapshot rejects changes to compared data since Preview.
 % Legacy (source, sldd, sheets, exportXlsx, mode) calls remain accepted;
 % the export path is ignored and never read, written, or deleted.
 %
 % Reads Bus, Element, DataType, Dim, Unit, Description from the source XLSX,
-% and every Data Interface from the specified SLDD and its references.
+% and matching Data Interfaces from the specified SLDD and its references.
 % Service/Physical Interfaces and Design Data buses are excluded.
 % Compares in memory, then saves only successfully applied element changes.
 %
@@ -26,7 +33,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %     expected elements are collected from ALL source sheets, protecting
 %     elements shared across sheets from accidental deletion.
 %   - Buses absent from the selected sheets are NEVER deleted/changed.
-%     In all-sheet mode their elements are reported as REMOVE (report only).
+%     Buses not named in Excel are ignored, including in all-sheet mode.
 %   - Empty Data Interfaces are inventoried but never removed.
 %   - Referenced SLDD interfaces are NEVER changed by this function.
 %   - Differences in existing element DataType/Dim/Unit/Description are
@@ -43,7 +50,13 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     if nargin < 3 || isempty(selectedSheets), selectedSheets = "all"; end
     if nargin < 4, modeOrLegacyExport = ""; end
     if nargin < 5 || isempty(mode), mode = "apply"; end
-    if nargin < 5 && isscalar(string(modeOrLegacyExport)) && ...
+    opts = struct();
+    if isstruct(modeOrLegacyExport)
+        opts = modeOrLegacyExport;
+        validateattributes(opts, {'struct'}, {'scalar'});
+        mode = 'preview';
+        if isfield(opts, 'Mode'), mode = opts.Mode; end
+    elseif nargin < 5 && isscalar(string(modeOrLegacyExport)) && ...
             ismember(lower(string(modeOrLegacyExport)), ["apply", "preview"])
         mode = modeOrLegacyExport;
     end
@@ -54,7 +67,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.6.0\n');
+    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.7.0\n');
     fprintf('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
@@ -69,7 +82,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
         'Added', 0, 'Removed', 0, 'NewInterfaces', 0, 'ReferencedSkipped', 0, ...
-        'OutOfScope', 0, 'Saved', false);
+        'OutOfScope', 0, 'SelectedAdd', 0, 'SelectedRemove', 0, 'Saved', false);
     summary.Changes = cell2table(cell(0, 5), 'VariableNames', ...
         {'Action', 'Interface', 'Property', 'SourceValue', 'TargetValue'});
 
@@ -79,18 +92,10 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     wasOpen = any(strcmpi(Simulink.data.dictionary.getOpenDictionaryPaths(), slddFile));
     archData = Simulink.dictionary.archdata.open(slddFile);
     cleanup = onCleanup(@() local_closeDictionary(archData, wasOpen));
-    [actual, summary.Interfaces] = local_readDataInterfaces(archData);
+    [actual, summary.Interfaces] = local_readDataInterfaces(archData, selectedBuses);
     fprintf('[SLDD] %s: %d Data Interfaces, %d elements\n', ...
         slddFile, height(summary.Interfaces), actual.Count);
-    scope = containers.Map('KeyType', 'char', 'ValueType', 'logical');
-    buses = keys(selectedBuses);
-    for i = 1:numel(buses), scope(buses{i}) = true; end
-    if numel(targetSheets) == numel(sourceSheets)
-        % Include dictionary-only buses in full comparisons, without expanding writes.
-        for i = 1:height(summary.Interfaces)
-            scope(summary.Interfaces.Name{i}) = true;
-        end
-    end
+    scope = selectedBuses;
     [addKeys, removeKeys, metadataDiff, compared, changes] = compareInterfaces(expected, actual, scope);
     summary.Changes = cell2table(changes, 'VariableNames', summary.Changes.Properties.VariableNames);
     summary.Changes = sortrows(summary.Changes, {'Action', 'Interface', 'Property'});
@@ -98,6 +103,16 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary.ToAdd = numel(addKeys);
     summary.ToRemove = numel(removeKeys);
     summary.MetadataMismatch = numel(metadataDiff);
+    referenced = summary.Interfaces.Name(summary.Interfaces.Referenced);
+    summary.Selectable = ismember(string(summary.Changes.Action), ["ADD", "REMOVE"]);
+    for i = 1:height(summary.Changes)
+        bus = extractBefore(string(summary.Changes.Interface{i}), '.');
+        summary.Selectable(i) = summary.Selectable(i) && ~ismember(char(bus), referenced);
+    end
+    summary.Snapshot = local_createSnapshot(expected, actual, scope);
+    if isfield(opts, 'ExpectedSnapshot') && ~isequaln(opts.ExpectedSnapshot, summary.Snapshot)
+        error('InterfaceTools:StalePreview', 'Compared Excel or SLDD data changed. Run Preview again.');
+    end
 
     fprintf('[COMPARE] %d entries in selected buses; ADD=%d, REMOVE=%d, PROPERTY_DIFF=%d\n', ...
         compared, summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
@@ -105,17 +120,6 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     printChanges('REMOVE', removeKeys, actual, inf);
     for i = 1:numel(metadataDiff)
         fprintf('  [PROPERTY_DIFF] %s\n', metadataDiff{i});
-    end
-
-    scopedRemovals = {};
-    for i = 1:numel(removeKeys)
-        if isKey(selectedBuses, getBusFromKey(removeKeys{i}))
-            scopedRemovals{end+1} = removeKeys{i}; %#ok<AGROW>
-        end
-    end
-    summary.OutOfScope = numel(removeKeys) - numel(scopedRemovals);
-    if summary.OutOfScope > 0
-        fprintf('[REPORT ONLY] %d removals belong to buses absent from selected sheets.\n', summary.OutOfScope);
     end
 
     % Matching keys and metadata-only differences never trigger writes.
@@ -128,7 +132,15 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         return;
     end
 
-    if isempty(addKeys) && isempty(scopedRemovals), return; end
+    if isfield(opts, 'SelectedChanges')
+        [addKeys, removeKeys] = local_selectChanges(opts.SelectedChanges, summary.Changes, summary.Selectable);
+    end
+    summary.SelectedAdd = numel(addKeys);
+    summary.SelectedRemove = numel(removeKeys);
+    if isempty(addKeys) && isempty(removeKeys)
+        fprintf('[UNCHANGED] No changes selected.\n');
+        return;
+    end
     checked = containers.Map('KeyType', 'char', 'ValueType', 'logical');
     local_requireCleanDictionary(slddFile, checked);
 
@@ -145,7 +157,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     try
         [summary.Added, summary.Removed, summary.NewInterfaces, ...
             summary.ReferencedSkipped] = applyDifferences(archData, ...
-            expected, addKeys, scopedRemovals);
+            expected, addKeys, removeKeys);
 
         if summary.Added > 0 || summary.Removed > 0
             save(archData);
@@ -238,12 +250,13 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
     end
 end
 
-function [actual, inventory] = local_readDataInterfaces(archData)
+function [actual, inventory] = local_readDataInterfaces(archData, scope)
     actual = containers.Map('KeyType', 'char', 'ValueType', 'any');
     rows = cell(0, 3);
     names = sort(getInterfaceNames(archData));
     localNames = getInterfaceNames(archData, 'LookInsideDictReferences', false);
     for i = 1:numel(names)
+        if ~isKey(scope, names{i}), continue; end
         interfaceObj = getInterface(archData, names{i});
         if ~isa(interfaceObj, 'Simulink.dictionary.archdata.DataInterface'), continue; end
         elements = interfaceObj.Elements;
@@ -267,7 +280,47 @@ function [actual, inventory] = local_readDataInterfaces(archData)
             actual(pairKey(rec.bus, rec.element)) = rec;
         end
     end
-    inventory = cell2table(rows, 'VariableNames', {'Name', 'ElementCount', 'Referenced'});
+    inventory = table(rows(:, 1), reshape(cell2mat(rows(:, 2)), [], 1), ...
+        reshape(logical(cell2mat(rows(:, 3))), [], 1), ...
+        'VariableNames', {'Name', 'ElementCount', 'Referenced'});
+end
+
+function snapshot = local_createSnapshot(expected, actual, scope)
+    snapshot = cell(0, 7);
+    inventories = {expected, actual};
+    for side = 1:2
+        inventory = inventories{side};
+        names = sort(keys(inventory));
+        for i = 1:numel(names)
+            row = inventory(names{i});
+            if ~isKey(scope, row.bus), continue; end
+            snapshot(end+1, :) = {side, row.bus, row.element, row.dataType, ...
+                row.dimensions, row.unit, row.description}; %#ok<AGROW>
+        end
+    end
+end
+
+function [addKeys, removeKeys] = local_selectChanges(selected, changes, selectable)
+    if ~istable(selected) || ~all(ismember({'Action', 'Interface'}, selected.Properties.VariableNames))
+        error('InterfaceTools:Selection', 'SelectedChanges must be a table with Action and Interface columns.');
+    end
+    chosen = string(selected.Action) + ":" + string(selected.Interface);
+    available = string(changes.Action) + ":" + string(changes.Interface);
+    if any(~ismember(chosen, available(selectable)))
+        error('InterfaceTools:Selection', 'Select only current, editable ADD/REMOVE rows. Run Preview again.');
+    end
+    addKeys = {};
+    removeKeys = {};
+    for i = 1:height(changes)
+        if ~ismember(available(i), chosen), continue; end
+        parts = split(string(changes.Interface{i}), '.');
+        key = pairKey(char(parts(1)), char(parts(2)));
+        if strcmp(changes.Action{i}, 'ADD')
+            addKeys{end+1} = key; %#ok<AGROW>
+        else
+            removeKeys{end+1} = key; %#ok<AGROW>
+        end
+    end
 end
 
 function [addKeys, removeKeys, differences, compared, changes] = compareInterfaces(expected, actual, scope)

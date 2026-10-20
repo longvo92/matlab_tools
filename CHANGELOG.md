@@ -2,6 +2,15 @@
 
 ## Interface tools
 
+### 1.7.0 - 2026-10-20
+
+- Tick individual local element additions/removals in the preview table, select
+  all or clear them, then apply only those changes. Property differences and
+  referenced interfaces remain report-only.
+- Compare only buses named in selected Excel sheets; ignore other SLDD buses.
+- Refresh the table after Apply and reject stale previews if compared data
+  changes. CLI options support the same selection and preview validation.
+
 ### 1.6.0 - 2026-10-20
 
 - Compare Excel directly with every Architectural Data Data Interface, including
