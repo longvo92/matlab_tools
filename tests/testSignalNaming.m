@@ -5,9 +5,98 @@ function testSignalNaming()
     previousPath = path;
     restore = onCleanup(@() path(previousPath));
     addpath(fullfile(repo, 'tools', 'signal_naming'), '-begin');
+    local_testFunctionElements();
     local_testTraceBoundaries();
     local_testInBusPropagation();
-    fprintf('PASS: CLI/GUI trace boundaries, In Bus labels, read-only Preview, no autosave.\n');
+    fprintf('PASS: CLI/GUI function elements/callers, trace boundaries, In Bus labels, read-only Preview, no autosave.\n');
+end
+
+function local_testFunctionElements()
+    % Each direction must work independently as well as in a mixed model.
+    kinds = {'Function Element Call', 'Function Element'};
+    for k = 1:numel(kinds)
+        [~, mdl] = fileparts(tempname);
+        new_system(mdl);
+        cleanup = onCleanup(@() close_system(mdl, 0));
+        functionBlock = [mdl '/FunctionPort'];
+        add_block(['simulink/Ports & Subsystems/' kinds{k}], functionBlock);
+        handles = get_param(functionBlock, 'PortHandles');
+        assert(isempty(handles.Inport) && isempty(handles.Outport));
+        assert(strcmp(get_param(functionBlock, 'IsBusElementPort'), 'on'));
+        set_param(mdl, 'Dirty', 'off');
+        opts = struct('verbose', false, 'dryRun', true);
+        report = nameBusElementSignals(mdl, opts);
+        local_assertFunctionSkipped(report, functionBlock);
+        assert(strcmp(get_param(mdl, 'Dirty'), 'off'));
+        opts.dryRun = false;
+        report = nameBusElementSignals(mdl, opts);
+        local_assertFunctionSkipped(report, functionBlock);
+        assert(strcmp(get_param(mdl, 'Dirty'), 'off'), 'Function-only Apply must not edit the model.');
+
+        otherFunctionBlock = [mdl '/OtherFunctionPort'];
+        add_block(['simulink/Ports & Subsystems/' kinds{3-k}], otherFunctionBlock);
+
+        % A caller's data output remains a normal signal naming target.
+        caller = [mdl '/Caller'];
+        add_block('simulink/User-Defined Functions/Function Caller', caller, ...
+            'FunctionPrototype', 'y = f(u)');
+        add_block('simulink/Ports & Subsystems/In Bus Element', [mdl '/In'], ...
+            'PortName', 'InputBus', 'Element', 'Request.Value');
+        add_block('simulink/Ports & Subsystems/Out Bus Element', [mdl '/Out'], ...
+            'PortName', 'OutputBus', 'Element', 'Result.Value');
+        inputLine = add_line(mdl, 'In/1', 'Caller/1');
+        outputLine = add_line(mdl, 'Caller/1', 'Out/1');
+        add_block('simulink/User-Defined Functions/Function Caller', [mdl '/VoidCaller'], ...
+            'FunctionPrototype', 'notify()');
+        prototype = get_param(caller, 'FunctionPrototype');
+        element = get_param(functionBlock, 'Element');
+        set_param(mdl, 'Dirty', 'off');
+        opts.dryRun = true;
+        report = nameBusElementSignals(mdl, opts);
+        local_assertFunctionSkipped(report, functionBlock);
+        local_assertFunctionSkipped(report, otherFunctionBlock);
+        assert(numel(report) == 4 && strcmp(get_param(mdl, 'Dirty'), 'off'));
+        assert(isempty(get_param(inputLine, 'Name')) && isempty(get_param(outputLine, 'Name')));
+        opts.dryRun = false;
+        report = nameBusElementSignals(mdl, opts);
+        local_assertFunctionSkipped(report, functionBlock);
+        local_assertFunctionSkipped(report, otherFunctionBlock);
+        assert(strcmp(get_param(inputLine, 'Name'), 'Request_Value'));
+        assert(strcmp(get_param(outputLine, 'Name'), 'Result_Value'));
+        assert(~any(startsWith({report.status}, 'error:') | startsWith({report.propagated}, 'err:')));
+        assert(strcmp(local_propagated(inputLine), 'off'));
+        assert(strcmp(get_param(caller, 'FunctionPrototype'), prototype));
+        assert(strcmp(get_param(functionBlock, 'Element'), element));
+
+        local_reset([inputLine outputLine]);
+        fig = nameBusElementSignalsGui(mdl, opts);
+        figCleanup = onCleanup(@() delete(fig));
+        set_param(mdl, 'Dirty', 'off');
+        button = findall(fig, 'Tag', 'Preview');
+        button.ButtonPushedFcn(button, []);
+        assert(isempty(fig.UserData.Error) && strcmp(fig.UserData.Mode, 'Preview'));
+        local_assertFunctionSkipped(fig.UserData.Report, functionBlock);
+        local_assertFunctionSkipped(fig.UserData.Report, otherFunctionBlock);
+        assert(strcmp(get_param(mdl, 'Dirty'), 'off'));
+        assert(isempty(get_param(inputLine, 'Name')) && isempty(get_param(outputLine, 'Name')));
+        button = findall(fig, 'Tag', 'Apply');
+        button.ButtonPushedFcn(button, []);
+        assert(isempty(fig.UserData.Error) && strcmp(fig.UserData.Mode, 'Apply'));
+        local_assertFunctionSkipped(fig.UserData.Report, functionBlock);
+        local_assertFunctionSkipped(fig.UserData.Report, otherFunctionBlock);
+        assert(strcmp(get_param(inputLine, 'Name'), 'Request_Value'));
+        assert(strcmp(get_param(outputLine, 'Name'), 'Result_Value'));
+        assert(strcmp(get_param(caller, 'FunctionPrototype'), prototype));
+        assert(strcmp(get_param(functionBlock, 'Element'), element));
+        assert(strcmp(get_param(mdl, 'Dirty'), 'on') && isempty(get_param(mdl, 'FileName')));
+        clear figCleanup cleanup;
+    end
+end
+
+function local_assertFunctionSkipped(report, block)
+    row = report(strcmp({report.block}, block));
+    assert(isscalar(row) && startsWith(row.status, 'skipped: no data '));
+    assert(isempty(row.name) && isempty(row.propagated));
 end
 
 function local_testTraceBoundaries()

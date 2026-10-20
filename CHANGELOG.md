@@ -13,6 +13,13 @@
 
 ## Bus element signal naming
 
+### 2.0.2 - 2026-10-20
+
+- Fix index errors in models containing Function Element Call or Function
+  Element blocks by skipping bus-element blocks without data ports in CLI and
+  GUI. Continue naming data signals, including Function Caller data outputs,
+  without changing function prototypes or function element definitions.
+
 ### 2.0.1 - 2026-10-20
 
 - Stop Out Bus Element upstream tracing at Signal Conversion (including Signal

@@ -1,6 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
-% Version: 2.0.1 (Signal naming).
+% Version: 2.0.2 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element;
 %                    its ShowPropagatedSignals setting is left unchanged.
@@ -16,6 +16,8 @@ function report = nameBusElementSignals(sys, opts)
 %   ports, not Bus Selector / Bus Creator). These are Inport/Outport blocks
 %   with IsBusElementPort == 'on' and an Element parameter naming the bus
 %   element they map to.
+%   Function Element Call / Function Element blocks have no data ports and
+%   are reported as skipped. Function Caller data outputs remain nameable.
 %
 %   REPORT = NAMEBUSELEMENTSIGNALS() operates on the current system (GCS).
 %   REPORT = NAMEBUSELEMENTSIGNALS(SYS) operates on SYS (model name, does not
@@ -91,6 +93,10 @@ function report = nameBusElementSignals(sys, opts)
         end
         nm = local_buildName(elem);
         ph = get_param(blk, 'PortHandles');
+        if isempty(ph.Outport) % Function Element Call has no data output port.
+            report(end + 1) = local_mkRow(blk, 'In', elem, '', '', 'skipped: no data output port'); %#ok<AGROW>
+            continue;
+        end
         ln = get_param(ph.Outport(1), 'Line');
         [st, nmFinal, parent] = local_applyName(ln, nm, opts);
         prop = local_setPropagated(ln, opts);
@@ -108,6 +114,10 @@ function report = nameBusElementSignals(sys, opts)
         end
         nm = local_buildName(elem);
         ph = get_param(blk, 'PortHandles');
+        if isempty(ph.Inport) % Function Element has no data input port.
+            report(end + 1) = local_mkRow(blk, 'Out', elem, '', '', 'skipped: no data input port'); %#ok<AGROW>
+            continue;
+        end
         ln = get_param(ph.Inport(1), 'Line');
         if ~local_isValidLine(ln)
             report(end + 1) = local_mkRow(blk, 'Out', elem, nm, '', 'skipped: unconnected'); %#ok<AGROW>

@@ -1,6 +1,6 @@
 function fig = nameBusElementSignalsGui(sys, opts)
 %NAMEBUSELEMENTSIGNALSGUI Preview and apply bus-element signal names.
-% Version: 2.0.1 (Signal naming).
+% Version: 2.0.2 (Signal naming).
 %   nameBusElementSignalsGui
 %   fig = nameBusElementSignalsGui('MyModel/Subsystem')
 %   fig = nameBusElementSignalsGui(gcs, struct('overwrite', true))
@@ -12,6 +12,7 @@ function fig = nameBusElementSignalsGui(sys, opts)
 % Apply edits the model in memory without saving it. Verbose output is off.
 % In Bus Element first lines keep their propagation setting. Out Bus Element
 % tracing stops at Signal Copy/Conversion and Signal Specification outputs.
+% Function Element Call / Function Element blocks without data ports are skipped.
 % The latest backend report is available in fig.UserData.Report.
 %
 % Copy this file with nameBusElementSignals.m onto the MATLAB path.
@@ -39,7 +40,7 @@ function fig = nameBusElementSignalsGui(sys, opts)
         end
     end
     busy = false;
-    fig = uifigure('Name', 'Bus Element Signal Naming v2.0.1', ...
+    fig = uifigure('Name', 'Bus Element Signal Naming v2.0.2', ...
         'Position', [220 140 840 480], 'CloseRequestFcn', @(~, ~) closeGui());
     fig.UserData = struct('Report', [], 'Mode', '', 'Error', '');
     grid = uigridlayout(fig, [7 1], ...
