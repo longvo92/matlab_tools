@@ -1,12 +1,15 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
-% Version: 2.0.0 (Signal naming).
+% Version: 2.0.1 (Signal naming).
 %
-%   IN BUS ELEMENT : the line leaving the block is named after its Element.
+%   IN BUS ELEMENT : the line leaving the block is named after its Element;
+%                    its ShowPropagatedSignals setting is left unchanged.
 %   OUT BUS ELEMENT: traces upstream through virtual blocks (From/Goto,
-%                    SubSystem, Signal Specification/Conversion) to the block
+%                    SubSystem) to the block
 %                    that actually drives the signal, then names the line
 %                    there after the Out Bus Element's Element.
+%                    Signal Conversion (including Signal Copy) and Signal
+%                    Specification stop the trace; their output line is named.
 %
 %   Built for AUTOSAR-style Simulink models whose outermost layer uses the
 %   "In Bus Element" / "Out Bus Element" port blocks (the newer bus-element
@@ -25,7 +28,7 @@ function report = nameBusElementSignals(sys, opts)
 %                                  Bus Element upstream
 %     .traceIntoSubsystem  (true)  descend into SubSystem blocks when tracing
 %     .propagate           (true)  enable propagated labels on the source output port
-%                                  of the line into/out of the bus element port
+%                                  of the line into the Out Bus Element port
 %     .propagateTracePath  (false) also enable labels on source output ports
 %                                  along intermediate lines while tracing an
 %                                  Out Bus Element upstream
@@ -36,6 +39,8 @@ function report = nameBusElementSignals(sys, opts)
 %
 %   Propagation is enabled only where Simulink supports it; unsupported
 %   source blocks report propagated="n/a" on Apply. Dry-run requests no writes.
+%   Source ports on In Bus Element blocks are never enabled, including when
+%   reached from an Out Bus Element or along an intermediate trace path.
 %
 %   Names use the complete Element path (dots become underscores).
 %   Removed options prefix/useLeafName are accepted only with inactive values
@@ -185,12 +190,6 @@ function [ln, srcBlk, note, visited] = local_traceUpstream(ln, opts)
                 if ~local_isValidLine(nxt), note = 'inner Outport not connected'; return; end
                 ln = nxt;
 
-            case {'SignalSpecification', 'SignalConversion'}
-                iph = get_param(srcBlk, 'PortHandles');
-                nxt = get_param(iph.Inport(1), 'Line');
-                if ~local_isValidLine(nxt), return; end
-                ln = nxt;
-
             otherwise
                 return;   % block actually driving the signal -> stop here
         end
@@ -265,6 +264,9 @@ function note = local_setPropagated(ln, opts)
     ln = local_topLine(ln);
     port = get_param(ln, 'SrcPortHandle');
     if isempty(port) || port == -1, return; end
+    if local_isBusElementPort(get_param(port, 'Parent'))
+        note = 'skipped: In Bus Element'; return; % The named first line is the anchor.
+    end
     try
         if strcmp(get_param(port, 'ShowPropagatedSignals'), 'on')
             note = 'on(already)'; return;

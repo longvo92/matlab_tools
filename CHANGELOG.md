@@ -13,6 +13,13 @@
 
 ## Bus element signal naming
 
+### 2.0.1 - 2026-10-20
+
+- Stop Out Bus Element upstream tracing at Signal Conversion (including Signal
+  Copy) and Signal Specification, and name their output line.
+- Name the first In Bus Element line without enabling Show propagated, including
+  direct Out Bus connections and intermediate trace paths. Preserve existing settings.
+
 ### 2.0.0 - 2026-10-19
 
 - Remove name-prefix and leaf-element naming from CLI and GUI; always derive
