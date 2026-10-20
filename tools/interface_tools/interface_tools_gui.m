@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.9.0 (Interface tools bundle).
+% Version: 1.9.1 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -40,8 +40,10 @@ function fig = interface_tools_gui(opts)
 
     fig = uifigure('Name', 'CVC Interface Tools', ...
         'Position', [40 40 windowSize], 'Color', [0.97 0.98 0.99]);
-    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 28, '1x', 180}, ...
+    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 28, 220, 180}, ...
         'Padding', [16 12 16 12], 'RowSpacing', 8, 'Scrollable', 'on');
+    fig.SizeChangedFcn = @(~, ~) resizeLayout();
+    resizeLayout();
     uilabel(layout, 'Text', 'CVC Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
     sourceGrid = uigridlayout(layout, [2 3], 'RowHeight', {30, 22}, ...
         'ColumnWidth', {90, '1x', 90}, 'Padding', [0 0 0 0]);
@@ -128,6 +130,12 @@ function fig = interface_tools_gui(opts)
     % ------------------------------------------------------------
     % Select source XLSX / discover project
     % ------------------------------------------------------------
+    function resizeLayout()
+        % Keep the table usable on short displays; overflow scrolls as a whole.
+        fixedHeight = 28 + 72 + 320 + 28 + 180 + 24 + 5*8;
+        layout.RowHeight{5} = max(220, fig.Position(4) - fixedHeight);
+    end
+
     function browseExcel()
         [filename, folder] = uigetfile( ...
             {'*.xlsx;*.xlsm', 'Excel workbooks (*.xlsx, *.xlsm)'}, ...

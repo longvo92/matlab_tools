@@ -2,6 +2,15 @@
 
 ## Interface tools
 
+### 1.9.1 - 2026-10-20
+
+- Keep the differences table usable on short windows with a minimum height and
+  scrolling for overflowing panels.
+- Ignore Excel buses matching Service/Physical Interfaces during comparison and
+  Apply, so they cannot block valid element changes.
+- Ignore conflicting rows outside the selected bus scope while retaining
+  cross-sheet validation for compared buses.
+
 ### 1.9.0 - 2026-10-20
 
 - Show element definitions in ADD/REMOVE rows, including Excel values, missing

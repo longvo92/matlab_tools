@@ -1,6 +1,6 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.9.0 (Interface tools bundle).
+% Version: 1.9.1 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
@@ -33,7 +33,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %   - Only Status=remove (case-insensitive, trimmed) proposes a deletion.
 %     Missing/blank/other Status values never authorize removal. Elements
 %     absent from Excel are kept. Remove rows never propose additions.
-%   - Conflicting remove/keep rows for the same Bus.Element abort comparison.
+%   - Conflicting remove/keep rows for a compared Bus.Element abort comparison.
+%     Conflicts in buses outside the selected scope are ignored.
 %   - A selected sheet identifies the affected buses. For those buses,
 %     expected elements are collected from ALL source sheets, protecting
 %     elements shared across sheets from accidental deletion.
@@ -76,7 +77,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.9.0\n');
+    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.9.1\n');
     logMessage('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
@@ -85,8 +86,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     sourceSheets = cellstr(sheetnames(xlsxFile));
     targetSheets = resolveSheets(selectedSheets, sourceSheets);
 
-    % Read expected rows first; fail early on invalid source.
-    [expected, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets, logMessage);
+    % Collect scope before validating shared rows, regardless of sheet order.
+    [sourceRows, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets, logMessage);
 
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
@@ -102,10 +103,12 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     logMessage('[OPEN SLDD] %s\n', slddFile);
     archData = Simulink.dictionary.archdata.open(slddFile);
     cleanup = onCleanup(@() local_closeDictionary(archData, wasOpen));
-    [actual, summary.Interfaces] = local_readDataInterfaces(archData, selectedBuses, logMessage);
+    [actual, summary.Interfaces, scope] = local_readDataInterfaces(archData, selectedBuses, logMessage);
     logMessage('[SLDD] %s: %d Data Interfaces, %d elements\n', ...
         slddFile, height(summary.Interfaces), actual.Count);
-    scope = selectedBuses;
+    summary.OutOfScope = summary.Buses - scope.Count;
+    summary.Buses = scope.Count;
+    expected = local_mergeSourceRows(sourceRows, scope);
     [addKeys, removeKeys, metadataDiff, compared, changes] = compareInterfaces(expected, actual, scope);
     summary.Changes = cell2table(changes, 'VariableNames', summary.Changes.Properties.VariableNames);
     summary.Changes = sortrows(summary.Changes, {'Action', 'Interface', 'Property'});
@@ -209,8 +212,8 @@ function local_requireCleanDictionary(file, checked)
     end
 end
 
-function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets, logMessage)
-    expected = containers.Map('KeyType', 'char', 'ValueType', 'any');
+function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets, logMessage)
+    records = {};
     selectedBuses = containers.Map('KeyType', 'char', 'ValueType', 'logical');
 
     for i = 1:numel(sheets)
@@ -233,11 +236,6 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
             if isempty(bus) && ~isempty(elem), bus = previousBus; end
             if isempty(bus) && isempty(elem), continue; end
             if isempty(elem), continue; end  % Bus heading, no element row.
-            if ~isvarname(bus) || ~isvarname(elem)
-                error('Invalid Bus/Element in source %s row %d: %s / %s', ...
-                    sheet, r, bus, elem);
-            end
-
             rec = struct('bus', bus, 'element', elem, ...
                 'dataType', getText(raw, r, cols.datatype), ...
                 'dimensions', getText(raw, r, cols.dimensions), ...
@@ -245,29 +243,44 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
                 'description', getText(raw, r, cols.description), ...
                 'removeRequested', strcmpi(getText(raw, r, cols.status), 'remove'), ...
                 'origin', sprintf('%s:%d', sheet, r));
-            k = pairKey(bus, elem);
-            if isKey(expected, k)
-                other = expected(k);
-                if other.removeRequested ~= rec.removeRequested
-                    error('InterfaceTools:SourceConflict', ...
-                        'Conflicting remove/keep Status for %s.%s in %s and %s.', ...
-                        bus, elem, other.origin, rec.origin);
-                end
-                if ~rec.removeRequested && (~strcmp(other.dataType, rec.dataType) || ...
-                   ~strcmp(normalDim(other.dimensions), normalDim(rec.dimensions)))
-                    error(['Source conflict for %s.%s in %s and %s: ' ...
-                        'DataType or Dimensions differ.'], ...
-                        bus, elem, other.origin, rec.origin);
-                end
-            else
-                expected(k) = rec;
-            end
+            records{end+1} = rec; %#ok<AGROW>
             if selected, selectedBuses(bus) = true; end
         end
     end
 end
 
-function [actual, inventory] = local_readDataInterfaces(archData, scope, logMessage)
+function expected = local_mergeSourceRows(records, scope)
+% Validate only compared buses, including their rows in unselected sheets.
+    expected = containers.Map('KeyType', 'char', 'ValueType', 'any');
+    for i = 1:numel(records)
+        rec = records{i};
+        bus = rec.bus;
+        elem = rec.element;
+        if ~isKey(scope, bus), continue; end
+        if ~isvarname(bus) || ~isvarname(elem)
+            error('Invalid Bus/Element in source %s: %s / %s', rec.origin, bus, elem);
+        end
+        k = pairKey(bus, elem);
+        if isKey(expected, k)
+            other = expected(k);
+            if other.removeRequested ~= rec.removeRequested
+                error('InterfaceTools:SourceConflict', ...
+                    'Conflicting remove/keep Status for %s.%s in %s and %s.', ...
+                    bus, elem, other.origin, rec.origin);
+            end
+            if ~rec.removeRequested && (~strcmp(other.dataType, rec.dataType) || ...
+               ~strcmp(normalDim(other.dimensions), normalDim(rec.dimensions)))
+                error(['Source conflict for %s.%s in %s and %s: ' ...
+                    'DataType or Dimensions differ.'], ...
+                    bus, elem, other.origin, rec.origin);
+            end
+        else
+            expected(k) = rec;
+        end
+    end
+end
+
+function [actual, inventory, scope] = local_readDataInterfaces(archData, scope, logMessage)
     actual = containers.Map('KeyType', 'char', 'ValueType', 'any');
     rows = cell(0, 3);
     names = sort(getInterfaceNames(archData));
@@ -275,7 +288,11 @@ function [actual, inventory] = local_readDataInterfaces(archData, scope, logMess
     for i = 1:numel(names)
         if ~isKey(scope, names{i}), continue; end
         interfaceObj = getInterface(archData, names{i});
-        if ~isa(interfaceObj, 'Simulink.dictionary.archdata.DataInterface'), continue; end
+        if ~isa(interfaceObj, 'Simulink.dictionary.archdata.DataInterface')
+            remove(scope, names{i});
+            logMessage('[SKIP] %s is not a Data Interface; excluded from comparison.\n', names{i});
+            continue;
+        end
         elements = interfaceObj.Elements;
         logMessage('[READ SLDD] %s: %d elements, referenced=%d\n', ...
             names{i}, numel(elements), ~ismember(names{i}, localNames));

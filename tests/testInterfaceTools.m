@@ -80,6 +80,18 @@ function testInterfaceTools()
     assert(size(details.Data, 1) == 61);
     drawnow;
     assert(isequal(sheets.Layout.Column, [1 2]) && sheets.Position(3) > 500 && sheets.Position(4) > 130);
+    originalPosition = fig.Position;
+    fig.Position = [40 40 1180 668];
+    drawnow;
+    assert(details.Position(4) >= 220, 'Short windows must retain a usable differences table.');
+    assert(strcmp(details.Parent.Scrollable, 'on'));
+    scroll(details.Parent, 'bottom');
+    drawnow;
+    pause(0.2);
+    exportapp(fig, fullfile(sandbox, 'gui-short-window.png'));
+    scroll(details.Parent, 'top');
+    fig.Position = originalPosition;
+    drawnow;
     activity = findall(fig, 'Tag', 'ActivityLog');
     follow = findall(fig, 'Tag', 'FollowLog');
     assert(follow.Value && numel(activity.Value) > 60);
@@ -199,6 +211,7 @@ function testInterfaceTools()
     local_testDirectSnapshot(sandbox);
     local_testSelectedChanges(sandbox);
     local_testStatusRemoval(sandbox);
+    local_testComparisonScope(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
 end
@@ -448,6 +461,80 @@ function local_testStatusRemoval(sandbox)
     assert(result.ToRemove == 0 && ~result.Saved && isequal(before, local_bytes(file)));
     clear cleanup;
     fprintf('PASS: explicit remove Status, missing Status, stale Status, shared conflicts, selected deletion.\n');
+end
+
+function local_testComparisonScope(sandbox)
+    file = fullfile(sandbox, 'scope.sldd');
+    dd = Simulink.dictionary.archdata.create(file);
+    cleanup = onCleanup(@() local_close(dd));
+    bus = addDataInterface(dd, 'Valid');
+    addElement(bus, 'Keep');
+    addElement(bus, 'Old');
+    addServiceInterface(dd, 'Service');
+    addPhysicalInterface(dd, 'Physical');
+    save(dd);
+    close(dd);
+    source = fullfile(sandbox, 'scope.xlsx');
+    header = {'Bus', 'Element', 'DataType', 'Status'};
+    % The unselected sheet is first: scope must not depend on workbook order.
+    writecell([header; {'Ignored', 'Value', 'double', 'Accept'; ...
+        'Ignored', 'Value', 'single', 'remove'; 'Valid', 'Keep', 'double', ''}], ...
+        source, 'Sheet', 'Unselected');
+    selected = [header; {'Valid', 'New', 'double', ''; 'Valid', 'Old', '', 'remove'; ...
+        'Service', 'Value', 'double', ''; 'Service', 'Value', '', 'remove'; ...
+        'Physical', 'Value', 'double', ''}];
+    writecell(selected, source, 'Sheet', 'Selected');
+    before = local_bytes(file);
+    preview = sync_bus_interfaces_from_excel(source, file, 'Selected', 'preview');
+    assert(preview.ToAdd == 1 && preview.ToRemove == 1 && preview.MetadataMismatch == 0);
+    assert(preview.Buses == 1 && preview.OutOfScope == 2);
+    assert(all(startsWith(preview.Changes.Interface, 'Valid.')) && all(preview.Selectable));
+    assert(isequal(before, local_bytes(file)));
+    config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
+        '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
+    config.SourceXlsx = source;
+    config.ProjectRoot = sandbox;
+    config.SlddFile = file;
+    config.ParametersFile = fullfile(sandbox, 'scope-parameters.m');
+    configFile = fullfile(sandbox, 'scope-config.json');
+    local_write(configFile, jsonencode(config));
+    fig = interface_tools_gui(struct('ConfigFile', configFile));
+    figCleanup = onCleanup(@() delete(fig));
+    sheets = findall(fig, 'Tag', 'SyncSheets');
+    sheets.Value = {'Selected'};
+    sheets.ValueChangedFcn(sheets, []);
+    button = findall(fig, 'Tag', 'PreviewSldd');
+    button.ButtonPushedFcn(button, []);
+    details = findall(fig, 'Tag', 'InterfaceDifferences');
+    assert(size(details.Data, 1) == 2 && all(startsWith(details.Data(:, 3), 'Valid.')));
+    selectAll = findall(fig, 'Tag', 'SelectChanges');
+    selectAll.ButtonPushedFcn(selectAll, []);
+    assert(all(cell2mat(details.Data(:, 1))));
+    clear figCleanup;
+    opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes, ...
+        'ExpectedSnapshot', {preview.Snapshot});
+    result = sync_bus_interfaces_from_excel(source, file, 'Selected', opts);
+    assert(result.Added == 1 && result.Removed == 1 && result.Saved);
+    dd = Simulink.dictionary.archdata.open(file);
+    assert(isequal(sort(string({getInterface(dd, 'Valid').Elements.Name})), ["Keep", "New"]));
+    assert(isa(getInterface(dd, 'Service'), 'Simulink.dictionary.archdata.ServiceInterface'));
+    assert(isa(getInterface(dd, 'Physical'), 'Simulink.dictionary.archdata.PhysicalInterface'));
+    close(dd);
+    % Legacy apply-all also ignores unsupported types instead of aborting a batch.
+    selected(end+1, :) = {'Valid', 'Next', 'single', ''};
+    writecell(selected, source, 'Sheet', 'Selected');
+    result = sync_bus_interfaces_from_excel(source, file, 'Selected', 'apply');
+    assert(result.Added == 1 && result.Saved);
+    % Still reject conflicts for compared buses, including an earlier shared sheet.
+    writecell([header; {'Valid', 'Keep', 'double', 'remove'}], source, 'Sheet', 'Unselected');
+    selected(end+1, :) = {'Valid', 'Keep', 'double', 'Accept'};
+    writecell(selected, source, 'Sheet', 'Selected');
+    before = local_bytes(file);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'Selected', 'apply'), ...
+        'InterfaceTools:SourceConflict');
+    assert(isequal(before, local_bytes(file)));
+    clear cleanup;
+    fprintf('PASS: non-data interfaces excluded, out-of-scope conflicts ignored, shared scope protected.\n');
 end
 
 function local_expectError(action, identifier)
