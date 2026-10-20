@@ -2,6 +2,15 @@
 
 ## Interface tools
 
+### 1.10.0 - 2026-10-20
+
+- Apply checked DataType, dimensions, Unit, and Description differences in both
+  CLI and GUI, including plans containing only property changes. Leave unchecked
+  and unspecified fields intact; keep referenced interfaces read-only.
+- Preserve shared type definitions by copying named types into an element-specific
+  ValueType when changing one element. Show property update counts in the log.
+- Reject conflicting Unit/Description values for compared elements across sheets.
+
 ### 1.9.1 - 2026-10-20
 
 - Keep the differences table usable on short windows with a minimum height and

@@ -1,11 +1,11 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.9.1 (Interface tools bundle).
+% Version: 1.10.0 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
 % summary.Interfaces inventories Data Interfaces in the selected Excel buses only.
-% summary.Selectable marks editable ADD/REMOVE rows in summary.Changes.
+% summary.Selectable marks editable element/property rows in summary.Changes.
 % ADD/REMOVE rows include the element definition and missing/removal status.
 % Standalone backend; no exporter or intermediate workbook is needed.
 %
@@ -18,6 +18,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %       'ExpectedSnapshot', {preview.Snapshot});
 %   summary = sync_bus_interfaces_from_excel(sourceXlsx, slddFile, "all", opts)
 % opts.Mode defaults to preview. SelectedChanges is an Action/Interface table;
+% include Property when selecting PROPERTY_DIFF rows to identify each field;
 % an empty selection applies nothing. Omit it to retain legacy apply-all behavior.
 % ExpectedSnapshot rejects changes to compared data since Preview.
 % opts.LogFcn is an optional @(message) callback for live progress messages.
@@ -42,8 +43,9 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %     Buses not named in Excel are ignored, including in all-sheet mode.
 %   - Empty Data Interfaces are inventoried but never removed.
 %   - Referenced SLDD interfaces are NEVER changed by this function.
-%   - Differences in existing element DataType/Dim/Unit/Description are
-%     printed as warnings only; these do not trigger SLDD writes.
+%   - Apply updates selected DataType/Dim/Unit/Description differences from Excel.
+%     Blank source fields remain unspecified. Named/shared types are copied to
+%     an element-specific ValueType so other uses and references remain intact.
 %   - "preview" never edits or saves the dictionary.
 %   - Apply refuses dictionaries with unsaved changes, protecting user edits.
 %
@@ -77,7 +79,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.9.1\n');
+    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.10.0\n');
     logMessage('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
@@ -92,7 +94,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
         'Added', 0, 'Removed', 0, 'NewInterfaces', 0, 'ReferencedSkipped', 0, ...
-        'OutOfScope', 0, 'SelectedAdd', 0, 'SelectedRemove', 0, 'Saved', false);
+        'OutOfScope', 0, 'SelectedAdd', 0, 'SelectedRemove', 0, ...
+        'SelectedUpdate', 0, 'Updated', 0, 'Saved', false);
     summary.Changes = cell2table(cell(0, 5), 'VariableNames', ...
         {'Action', 'Interface', 'Property', 'SourceValue', 'TargetValue'});
 
@@ -117,7 +120,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary.ToRemove = numel(removeKeys);
     summary.MetadataMismatch = numel(metadataDiff);
     referenced = summary.Interfaces.Name(summary.Interfaces.Referenced);
-    summary.Selectable = ismember(string(summary.Changes.Action), ["ADD", "REMOVE"]);
+    summary.Selectable = ismember(string(summary.Changes.Action), ["ADD", "REMOVE", "PROPERTY_DIFF"]);
     for i = 1:height(summary.Changes)
         bus = extractBefore(string(summary.Changes.Interface{i}), '.');
         summary.Selectable(i) = summary.Selectable(i) && ~ismember(char(bus), referenced);
@@ -135,9 +138,9 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         logMessage('  [PROPERTY_DIFF] %s\n', metadataDiff{i});
     end
 
-    % Matching keys and metadata-only differences never trigger writes.
-    if isempty(addKeys) && isempty(removeKeys)
-        logMessage('[UNCHANGED] No Bus/Element additions or deletions. SLDD untouched.\n');
+    propertyChanges = summary.Changes(strcmp(summary.Changes.Action, 'PROPERTY_DIFF'), :);
+    if isempty(summary.Changes)
+        logMessage('[UNCHANGED] No element or property differences. SLDD untouched.\n');
         return;
     end
     if mode == "preview"
@@ -146,11 +149,13 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     if isfield(opts, 'SelectedChanges')
-        [addKeys, removeKeys] = local_selectChanges(opts.SelectedChanges, summary.Changes, summary.Selectable);
+        [addKeys, removeKeys, propertyChanges] = local_selectChanges( ...
+            opts.SelectedChanges, summary.Changes, summary.Selectable);
     end
     summary.SelectedAdd = numel(addKeys);
     summary.SelectedRemove = numel(removeKeys);
-    if isempty(addKeys) && isempty(removeKeys)
+    summary.SelectedUpdate = height(propertyChanges);
+    if isempty(addKeys) && isempty(removeKeys) && isempty(propertyChanges)
         logMessage('[UNCHANGED] No changes selected.\n');
         return;
     end
@@ -166,13 +171,21 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         end
         formatDimensionsForDataElement(rec.dimensions);
     end
+    for i = 1:height(propertyChanges)
+        if strcmp(propertyChanges.Property{i}, 'dimensions')
+            formatDimensionsForDataElement(propertyChanges.SourceValue{i});
+        end
+    end
 
     try
         [summary.Added, summary.Removed, summary.NewInterfaces, ...
             summary.ReferencedSkipped] = applyDifferences(archData, ...
             expected, addKeys, removeKeys, logMessage);
+        [summary.Updated, skippedProperties] = local_applyProperties(archData, ...
+            actual, propertyChanges, logMessage);
+        summary.ReferencedSkipped = summary.ReferencedSkipped + skippedProperties;
 
-        if summary.Added > 0 || summary.Removed > 0
+        if summary.Added > 0 || summary.Removed > 0 || summary.Updated > 0
             save(archData);
             summary.Saved = true;
             logMessage('[SAVED] Architectural Data -> %s\n', slddFile);
@@ -187,8 +200,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         end
         rethrow(ME);
     end
-    logMessage('[DONE] Added=%d, Removed=%d, NewInterfaces=%d, ReferencedSkipped=%d\n', ...
-        summary.Added, summary.Removed, summary.NewInterfaces, ...
+    logMessage('[DONE] Added=%d, Removed=%d, UpdatedProperties=%d, NewInterfaces=%d, ReferencedSkipped=%d\n', ...
+        summary.Added, summary.Removed, summary.Updated, summary.NewInterfaces, ...
         summary.ReferencedSkipped);
 end
 
@@ -274,6 +287,17 @@ function expected = local_mergeSourceRows(records, scope)
                     'DataType or Dimensions differ.'], ...
                     bus, elem, other.origin, rec.origin);
             end
+            if ~rec.removeRequested
+                for field = {'unit', 'description'}
+                    f = field{1};
+                    if ~isempty(other.(f)) && ~isempty(rec.(f)) && ~strcmp(other.(f), rec.(f))
+                        error('InterfaceTools:SourceConflict', ...
+                            'Conflicting %s for %s.%s in %s and %s.', f, bus, elem, other.origin, rec.origin);
+                    end
+                    if isempty(other.(f)), other.(f) = rec.(f); end
+                end
+                expected(k) = other;
+            end
         else
             expected(k) = rec;
         end
@@ -298,28 +322,30 @@ function [actual, inventory, scope] = local_readDataInterfaces(archData, scope, 
             names{i}, numel(elements), ~ismember(names{i}, localNames));
         rows(end+1, :) = {names{i}, numel(elements), ~ismember(names{i}, localNames)}; %#ok<AGROW>
         for j = 1:numel(elements)
-            elementObj = elements(j);
-            typeObj = elementObj.Type;
-            if isa(typeObj, 'Simulink.dictionary.archdata.DataInterface') || ...
-                    isa(typeObj, 'Simulink.dictionary.archdata.StructType')
-                dataType = ['Bus: ' typeObj.Name];
-                unit = '';
-            else
-                dataType = char(typeObj.DataType);
-                unit = char(typeObj.Unit);
-            end
-            rec = struct('bus', names{i}, 'element', elementObj.Name, ...
-                'dataType', strtrim(dataType), ...
-                'dimensions', strtrim(char(elementObj.Dimensions)), ...
-                'unit', strtrim(unit), 'description', strtrim(char(elementObj.Description)), ...
-                'removeRequested', false, ...
-                'origin', names{i});
+            rec = local_readElement(names{i}, elements(j));
             actual(pairKey(rec.bus, rec.element)) = rec;
         end
     end
     inventory = table(rows(:, 1), reshape(cell2mat(rows(:, 2)), [], 1), ...
         reshape(logical(cell2mat(rows(:, 3))), [], 1), ...
         'VariableNames', {'Name', 'ElementCount', 'Referenced'});
+end
+
+function rec = local_readElement(bus, elementObj)
+    typeObj = elementObj.Type;
+    if isa(typeObj, 'Simulink.dictionary.archdata.DataInterface') || ...
+            isa(typeObj, 'Simulink.dictionary.archdata.StructType')
+        dataType = ['Bus: ' typeObj.Name];
+        unit = '';
+    else
+        dataType = char(typeObj.DataType);
+        unit = char(typeObj.Unit);
+    end
+    rec = struct('bus', bus, 'element', elementObj.Name, ...
+        'dataType', strtrim(dataType), ...
+        'dimensions', strtrim(char(elementObj.Dimensions)), ...
+        'unit', strtrim(unit), 'description', strtrim(char(elementObj.Description)), ...
+        'removeRequested', false, 'origin', bus);
 end
 
 function snapshot = local_createSnapshot(expected, actual, scope)
@@ -337,24 +363,31 @@ function snapshot = local_createSnapshot(expected, actual, scope)
     end
 end
 
-function [addKeys, removeKeys] = local_selectChanges(selected, changes, selectable)
+function [addKeys, removeKeys, propertyChanges] = local_selectChanges(selected, changes, selectable)
     if ~istable(selected) || ~all(ismember({'Action', 'Interface'}, selected.Properties.VariableNames))
         error('InterfaceTools:Selection', 'SelectedChanges must be a table with Action and Interface columns.');
     end
-    chosen = string(selected.Action) + ":" + string(selected.Interface);
-    available = string(changes.Action) + ":" + string(changes.Interface);
+    if ~ismember('Property', selected.Properties.VariableNames)
+        if any(strcmp(string(selected.Action), 'PROPERTY_DIFF'))
+            error('InterfaceTools:Selection', 'Property is required when selecting PROPERTY_DIFF rows.');
+        end
+        selected.Property = repmat({'element'}, height(selected), 1);
+    end
+    chosen = string(selected.Action) + ":" + string(selected.Interface) + ":" + string(selected.Property);
+    available = string(changes.Action) + ":" + string(changes.Interface) + ":" + string(changes.Property);
     if any(~ismember(chosen, available(selectable)))
-        error('InterfaceTools:Selection', 'Select only current, editable ADD/REMOVE rows. Run Preview again.');
+        error('InterfaceTools:Selection', 'Select only current, editable change rows. Run Preview again.');
     end
     addKeys = {};
     removeKeys = {};
+    propertyChanges = changes(ismember(available, chosen) & strcmp(changes.Action, 'PROPERTY_DIFF'), :);
     for i = 1:height(changes)
         if ~ismember(available(i), chosen), continue; end
         parts = split(string(changes.Interface{i}), '.');
         key = pairKey(char(parts(1)), char(parts(2)));
         if strcmp(changes.Action{i}, 'ADD')
             addKeys{end+1} = key; %#ok<AGROW>
-        else
+        elseif strcmp(changes.Action{i}, 'REMOVE')
             removeKeys{end+1} = key; %#ok<AGROW>
         end
     end
@@ -485,6 +518,92 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
             removeElement(interfaceObj, elemName);
             removed = removed + 1;
             logMessage('  [-] %s.%s\n', bus, elemName);
+        end
+    end
+end
+
+function [updated, skipped] = local_applyProperties(archData, actual, changes, logMessage)
+    updated = 0;
+    skipped = 0;
+    localNames = getInterfaceNames(archData, 'LookInsideDictReferences', false);
+    elements = unique(changes.Interface, 'stable');
+    for i = 1:numel(elements)
+        rows = changes(strcmp(changes.Interface, elements{i}), :);
+        parts = split(elements{i}, '.');
+        bus = parts{1};
+        element = parts{2};
+        if ~ismember(bus, localNames)
+            skipped = skipped + height(rows);
+            logMessage('[SKIP] %s belongs to a referenced SLDD; no property edits.\n', elements{i});
+            continue;
+        end
+        elementObj = getElement(getInterface(archData, bus), element);
+        previous = actual(pairKey(bus, element));
+        local_updateElementProperties(archData, elementObj, previous, rows);
+        applied = local_readElement(bus, elementObj);
+        for j = 1:height(rows)
+            value = rows.SourceValue{j};
+            observed = applied.(rows.Property{j});
+            expectedValue = value;
+            if strcmp(rows.Property{j}, 'dimensions')
+                observed = normalDim(observed);
+                expectedValue = normalDim(expectedValue);
+            end
+            if ~strcmp(observed, expectedValue)
+                error('InterfaceTools:PropertyUpdate', ...
+                    'Could not apply %s [%s]: expected "%s", observed "%s".', ...
+                    elements{i}, rows.Property{j}, value, applied.(rows.Property{j}));
+            end
+            updated = updated + 1;
+            logMessage('  [~] %s [%s]: "%s" -> "%s"\n', elements{i}, ...
+                rows.Property{j}, rows.TargetValue{j}, value);
+        end
+    end
+end
+
+function local_updateElementProperties(archData, elementObj, previous, changes)
+% Keep named/shared type definitions intact when changing one element.
+    desired = previous;
+    for i = 1:height(changes)
+        desired.(changes.Property{i}) = changes.SourceValue{i};
+    end
+    oldType = elementObj.Type;
+    isAnonymous = isa(oldType, 'Simulink.dictionary.archdata.ValueType') && isempty(oldType.Name);
+    namedTypes = getDataTypeNames(archData);
+    needsCopy = ~isAnonymous || ismember(desired.dataType, namedTypes) || ...
+        startsWith(desired.dataType, {'Bus:', 'Enum:', 'ValueType:'});
+    if needsCopy
+        name = matlab.lang.makeValidName([previous.bus '_' previous.element '_Type']);
+        name = matlab.lang.makeUniqueStrings(name, ...
+            [cellstr(namedTypes(:)); reshape(cellstr(getInterfaceNames(archData)), [], 1)], namelengthmax);
+        valueType = addValueType(archData, name);
+        if isa(oldType, 'Simulink.dictionary.archdata.ValueType')
+            preserved = {'Minimum', 'Maximum', 'Complexity'};
+            for i = 1:numel(preserved)
+                valueType.(preserved{i}) = oldType.(preserved{i});
+            end
+        end
+        valueType.DataType = desired.dataType;
+        valueType.Unit = desired.unit;
+        dimensions = desired.dimensions;
+        if any(strcmp(changes.Property, 'dimensions'))
+            dimensions = formatDimensionsForDataElement(dimensions);
+        end
+        valueType.Dimensions = dimensions;
+        valueType.Description = desired.description;
+        elementObj.Type = valueType;
+    else
+        for i = 1:height(changes)
+            switch changes.Property{i}
+                case 'dataType'
+                    elementObj.Type.DataType = desired.dataType;
+                case 'unit'
+                    elementObj.Type.Unit = desired.unit;
+                case 'dimensions'
+                    elementObj.Dimensions = formatDimensionsForDataElement(desired.dimensions);
+                case 'description'
+                    elementObj.Description = desired.description;
+            end
         end
     end
 end

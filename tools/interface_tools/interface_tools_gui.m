@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.9.1 (Interface tools bundle).
+% Version: 1.10.0 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -9,8 +9,8 @@ function fig = interface_tools_gui(opts)
 % ProjectRoot (or absolute). Empty ProjectRoot enables project discovery.
 % Sheets affect SLDD only; parameter generation always processes ALL sheets.
 % Preview lists every ADD/REMOVE/PROPERTY_DIFF as bus.element in a table.
-% Tick individual ADD/REMOVE rows, then Apply selected. Preview is required.
-% Property differences and referenced interfaces cannot be selected.
+% Tick individual element/property changes, then Apply selected. Preview is required.
+% Referenced interfaces cannot be selected.
 % Only buses named in selected Excel sheets are compared.
 % REMOVE requires Status=remove in Excel; elements absent from Excel are kept.
 %
@@ -296,7 +296,7 @@ function fig = interface_tools_gui(opts)
         end
         if doApply
             if isempty(previewReport)
-                appendLog('Run Preview and tick ADD/REMOVE rows before applying.');
+                appendLog('Run Preview and tick element/property changes before applying.');
                 return;
             end
             chosen = cell2mat(detailTable.Data(:, 1));
@@ -327,10 +327,10 @@ function fig = interface_tools_gui(opts)
                 requested = selected;
                 if numel(selected) == numel(knownSheets), requested = 'all'; end
                 if doApply
-                    appendLog(sprintf('Applying %d selected element changes ...', sum(chosen)));
+                    appendLog(sprintf('Applying %d selected changes ...', sum(chosen)));
                     summary = sync_bus_interfaces_from_excel(source, slddFile, requested, applyOptions);
-                    appendLog(sprintf('Applied: ADD=%d REMOVE=%d SAVED=%d', ...
-                        summary.Added, summary.Removed, summary.Saved));
+                    appendLog(sprintf('Applied: ADD=%d REMOVE=%d UPDATE=%d SAVED=%d', ...
+                        summary.Added, summary.Removed, summary.Updated, summary.Saved));
                 end
                 resetPreview();
                 detailLabel.Text = 'Comparing Excel buses with SLDD ...';
@@ -339,14 +339,14 @@ function fig = interface_tools_gui(opts)
                 previewReport = sync_bus_interfaces_from_excel(source, slddFile, requested, previewOptions);
                 detailTable.Data = [num2cell(false(height(previewReport.Changes), 1)), ...
                     table2cell(previewReport.Changes)];
-                detailLabel.Text = sprintf('%d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
+                detailLabel.Text = sprintf('%d ADD, %d REMOVE, %d PROPERTY_DIFF', ...
                     previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch);
                 updateApplyState();
                 appendLog(sprintf('Preview: %d ADD, %d REMOVE, %d PROPERTY_DIFF; %d editable changes.', ...
                     previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch, ...
                     sum(previewReport.Selectable)));
                 appendLog('REMOVE requires Status=remove in Excel; missing elements are kept.');
-                appendLog(sprintf('%d matching Data Interfaces; tick local ADD/REMOVE rows to apply.', ...
+                appendLog(sprintf('%d matching Data Interfaces; tick local element/property changes to apply.', ...
                     height(previewReport.Interfaces)));
             end
             if doParams

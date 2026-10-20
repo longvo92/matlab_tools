@@ -105,13 +105,13 @@ function testInterfaceTools()
     assert(strcmp(applyButton.Enable, 'off') && ~any(cell2mat(details.Data(:, 1))));
     selectChanges = findall(fig, 'Tag', 'SelectChanges');
     selectChanges.ButtonPushedFcn(selectChanges, []);
-    assert(sum(cell2mat(details.Data(:, 1))) == 36);
+    assert(sum(cell2mat(details.Data(:, 1))) == 61);
     clearChanges = findall(fig, 'Tag', 'ClearChanges');
     clearChanges.ButtonPushedFcn(clearChanges, []);
     assert(strcmp(applyButton.Enable, 'off'));
     propertyRow = find(strcmp(details.Data(:, 2), 'PROPERTY_DIFF'), 1);
     details.CellEditCallback(details, struct('Indices', [propertyRow 1], 'NewData', true));
-    assert(~details.Data{propertyRow, 1});
+    assert(details.Data{propertyRow, 1});
     addRow = find(strcmp(details.Data(:, 3), 'BusA.New01'), 1);
     removeRow = find(strcmp(details.Data(:, 3), 'BusA.Old'), 1);
     assert(strcmp(details.Data{addRow, 4}, 'element') && contains(details.Data{addRow, 5}, 'DataType=double'));
@@ -119,18 +119,21 @@ function testInterfaceTools()
     assert(strcmp(details.Data{removeRow, 5}, 'Status=remove') && contains(details.Data{removeRow, 6}, 'Dim=1'));
     details.CellEditCallback(details, struct('Indices', [addRow 1], 'NewData', true));
     details.CellEditCallback(details, struct('Indices', [removeRow 1], 'NewData', true));
-    assert(strcmp(applyButton.Enable, 'on') && contains(applyButton.Text, '(2)'));
+    assert(strcmp(applyButton.Enable, 'on') && contains(applyButton.Text, '(3)'));
     drawnow; pause(0.2); % Let the web UI paint before capturing the controls.
     exportapp(fig, fullfile(sandbox, 'gui-selected.png'));
     applyButton.ButtonPushedFcn(applyButton, []);
-    assert(size(details.Data, 1) == 59 && strcmp(applyButton.Enable, 'off'));
+    assert(size(details.Data, 1) == 58 && strcmp(applyButton.Enable, 'off'));
     logText = strjoin(activity.Value, newline);
     assert(contains(logText, '[+] BusA.New01') && contains(logText, '[-] BusA.Old'));
-    assert(contains(logText, '[SAVED]') && contains(logText, 'Applied: ADD=1 REMOVE=1 SAVED=1'));
+    assert(contains(logText, '[SAVED]') && contains(logText, 'Applied: ADD=1 REMOVE=1 UPDATE=1 SAVED=1'));
+    assert(contains(logText, '[~] BusA.Keep01 [dataType]'));
     dd = Simulink.dictionary.archdata.open(dictionary);
     bus = getInterface(dd, 'BusA');
     assert(any(strcmp({bus.Elements.Name}, 'New01')) && ~any(strcmp({bus.Elements.Name}, 'New02')));
     assert(~any(strcmp({bus.Elements.Name}, 'Old')));
+    assert(strcmp(getElement(bus, 'Keep01').Type.DataType, 'double'));
+    assert(strcmp(getElement(bus, 'Keep02').Type.DataType, 'uint8'));
     close(dd);
     sheets.Value = {'ModelB'};
     sheets.ValueChangedFcn(sheets, []);
@@ -163,13 +166,13 @@ function testInterfaceTools()
     clear figCleanup;
 
     summary = sync_bus_interfaces_from_excel('source.xlsx', dictionary, 'ModelA', 'export.xlsx', 'apply');
-    assert(summary.Added == 34 && summary.Removed == 0 && summary.Saved);
+    assert(summary.Added == 34 && summary.Removed == 0 && summary.Updated == 24 && summary.Saved);
     dd = Simulink.dictionary.archdata.open(dictionary);
     bus = getInterface(dd, 'BusA');
     names = string({bus.Elements.Name});
     assert(any(names == 'Shared') && any(names == 'New35') && ~any(names == 'Old'));
     elem = getElement(bus, 'Keep01');
-    assert(strcmp(elem.Type.DataType, 'uint8'), 'Property differences must remain report-only.');
+    assert(strcmp(elem.Type.DataType, 'double'));
     other = getInterface(dd, 'BusB');
     assert(isequal(string({other.Elements.Name}), "Safe"));
     close(dd);
@@ -177,10 +180,12 @@ function testInterfaceTools()
 
     % Direct reads must observe Apply immediately, without a workbook snapshot.
     [~, summary] = evalc('sync_bus_interfaces_from_excel(''source.xlsx'', dictionary, ''ModelA'', ''export.xlsx'', ''preview'')');
-    assert(summary.ToAdd == 0 && summary.ToRemove == 0 && summary.MetadataMismatch == 25);
-    assert(height(summary.Changes) == 25 && ~summary.Saved);
+    assert(summary.ToAdd == 0 && summary.ToRemove == 0 && summary.MetadataMismatch == 0);
+    assert(isempty(summary.Changes) && ~summary.Saved);
     for k = 2:26, source{k, 3} = 'uint8'; end
     writecell(source, 'source.xlsx', 'Sheet', 'ModelA');
+    summary = sync_bus_interfaces_from_excel('source.xlsx', dictionary, 'ModelA', 'apply');
+    assert(summary.Updated == 25 && summary.Added == 0 && summary.Removed == 0 && summary.Saved);
     [~, summary] = evalc('sync_bus_interfaces_from_excel(''source.xlsx'', dictionary, ''ModelA'', ''export.xlsx'', ''preview'')');
     assert(isempty(summary.Changes) && width(summary.Changes) == 5 && ~summary.Saved);
 
@@ -212,6 +217,7 @@ function testInterfaceTools()
     local_testSelectedChanges(sandbox);
     local_testStatusRemoval(sandbox);
     local_testComparisonScope(sandbox);
+    local_testPropertyUpdates(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
 end
@@ -289,7 +295,7 @@ function local_testDirectSnapshot(sandbox)
     assert(isequal(before, local_bytes(file)) && isequal(refBefore, local_bytes(referenceFile)));
     report = sync_bus_interfaces_from_excel(source, file, 'all', 'apply');
     assert(report.Added == 1 && report.NewInterfaces == 1 && report.Removed == 0);
-    assert(report.Saved && report.ReferencedSkipped == 1 && report.OutOfScope == 0);
+    assert(report.Saved && report.ReferencedSkipped == 2 && report.OutOfScope == 0);
     ref = Simulink.dictionary.archdata.open(referenceFile);
     assert(isequal(string({getInterface(ref, 'Referenced').Elements.Name}), "Keep"));
     assert(strcmp(getElement(getInterface(ref, 'Referenced'), 'Keep').Type.DataType, 'double'));
@@ -365,7 +371,7 @@ function local_testSelectedChanges(sandbox)
     result = sync_bus_interfaces_from_excel(source, file, 'all', empty);
     assert(~result.Saved && isequal(before, local_bytes(file)));
     invalid = opts;
-    invalid.SelectedChanges = report.Changes(strcmp(report.Changes.Action, 'PROPERTY_DIFF'), :);
+    invalid.SelectedChanges = report.Changes(strcmp(report.Changes.Action, 'PROPERTY_DIFF'), {'Action', 'Interface'});
     local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', invalid), ...
         'InterfaceTools:Selection');
     invalid.SelectedChanges = table({'ADD'}, {'OtherBus.New'}, 'VariableNames', {'Action', 'Interface'});
@@ -535,6 +541,165 @@ function local_testComparisonScope(sandbox)
     assert(isequal(before, local_bytes(file)));
     clear cleanup;
     fprintf('PASS: non-data interfaces excluded, out-of-scope conflicts ignored, shared scope protected.\n');
+end
+
+function local_testPropertyUpdates(sandbox)
+    reference = fullfile(sandbox, 'propertyReference.sldd');
+    ref = Simulink.dictionary.archdata.create(reference);
+    refCleanup = onCleanup(@() local_close(ref));
+    sharedRef = addValueType(ref, 'SharedRef');
+    sharedRef.Unit = 'm/s';
+    refBus = addDataInterface(ref, 'RefConsumer');
+    refElem = addElement(refBus, 'Keep');
+    refElem.Type = sharedRef;
+    save(ref);
+    close(ref);
+    file = fullfile(sandbox, 'properties.sldd');
+    dd = Simulink.dictionary.archdata.create(file);
+    cleanup = onCleanup(@() local_close(dd));
+    addReference(dd, 'propertyReference.sldd');
+    bus = addDataInterface(dd, 'Properties');
+    elem = addElement(bus, 'APlain');
+    elem.Type.Unit = 'm/s';
+    elem.Description = 'Old plain';
+    value = addValueType(dd, 'Shared');
+    value.Unit = 'm/s';
+    value.Minimum = '-10';
+    value.Maximum = '100';
+    value.Description = 'Old shared';
+    for name = {'Named', 'Peer'}
+        elem = addElement(bus, name{1});
+        elem.Type = value;
+    end
+    elem = addElement(bus, 'NamedRef');
+    elem.Type = getDataType(dd, 'SharedRef');
+    alias = addAliasType(dd, 'Counter');
+    alias.BaseType = 'uint8';
+    elem = addElement(bus, 'Alias');
+    elem.Type = alias;
+    inner = addDataInterface(dd, 'Inner');
+    elem = addElement(bus, 'Nested');
+    elem.Type = inner;
+    save(dd);
+    close(dd);
+    source = fullfile(sandbox, 'properties.xlsx');
+    rows = {'Bus', 'Element', 'DataType', 'Dim', 'Unit', 'Description'; ...
+        'Properties', 'APlain', 'single', '2x3', 'km/h', 'New plain'; ...
+        'Properties', 'Named', 'single', '2', 'km/h', 'New named'; ...
+        'Properties', 'NamedRef', 'single', '2', 'km/h', 'New ref'; ...
+        'Properties', 'Alias', 'uint16', '2', '', 'New alias'; ...
+        'Properties', 'Nested', 'double', '2', '', 'New nested'};
+    writecell(rows, source);
+    before = local_bytes(file);
+    refBefore = local_bytes(reference);
+    preview = sync_bus_interfaces_from_excel(source, file, 'all', 'preview');
+    assert(preview.ToAdd == 0 && preview.ToRemove == 0 && preview.MetadataMismatch > 4);
+    assert(all(preview.Selectable) && isequal(before, local_bytes(file)));
+    selected = strcmp(preview.Changes.Interface, 'Properties.APlain') & strcmp(preview.Changes.Property, 'unit');
+    opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes(selected, :), ...
+        'ExpectedSnapshot', {preview.Snapshot});
+    invalid = opts;
+    invalid.SelectedChanges.Property{1} = 'unknown';
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', invalid), 'InterfaceTools:Selection');
+    rows{2, 5} = 'm';
+    writecell(rows, source);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), 'InterfaceTools:StalePreview');
+    rows{2, 5} = 'km/h';
+    writecell(rows, source);
+    result = sync_bus_interfaces_from_excel(source, file, 'all', opts);
+    assert(result.Updated == 1 && result.SelectedUpdate == 1 && result.Saved);
+    dd = Simulink.dictionary.archdata.open(file);
+    elem = getElement(getInterface(dd, 'Properties'), 'APlain');
+    assert(strcmp(elem.Type.Unit, 'km/h') && strcmp(elem.Type.DataType, 'double'));
+    assert(strcmp(elem.Dimensions, '1') && strcmp(elem.Description, 'Old plain'));
+    close(dd);
+    % Description-only updates on named types must be effective and isolated.
+    preview = sync_bus_interfaces_from_excel(source, file, 'all', 'preview');
+    selected = strcmp(preview.Changes.Interface, 'Properties.Named') & strcmp(preview.Changes.Property, 'description');
+    opts.SelectedChanges = preview.Changes(selected, :);
+    opts.ExpectedSnapshot = preview.Snapshot;
+    result = sync_bus_interfaces_from_excel(source, file, 'all', opts);
+    assert(result.Updated == 1);
+    dd = Simulink.dictionary.archdata.open(file);
+    elem = getElement(getInterface(dd, 'Properties'), 'Named');
+    assert(strcmp(elem.Description, 'New named') && strcmp(elem.Type.DataType, 'double'));
+    assert(strcmp(elem.Type.Unit, 'm/s') && strcmp(elem.Dimensions, '1'));
+    assert(strcmp(elem.Type.Minimum, '-10') && strcmp(elem.Type.Maximum, '100'));
+    assert(strcmp(getElement(getInterface(dd, 'Properties'), 'Peer').Description, 'Old shared'));
+    close(dd);
+    % An error after the first property write must discard the whole transaction.
+    preview = sync_bus_interfaces_from_excel(source, file, 'all', 'preview');
+    opts.SelectedChanges = preview.Changes;
+    opts.ExpectedSnapshot = preview.Snapshot;
+    opts.LogFcn = @local_failAfterProperty;
+    before = local_bytes(file);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), 'InterfaceTools:TestFailure');
+    assert(isequal(before, local_bytes(file)) && isequal(refBefore, local_bytes(reference)));
+    opts.LogFcn = @(message) local_failAfterProperty(message, 'Properties.Named');
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), 'InterfaceTools:TestFailure');
+    assert(isequal(before, local_bytes(file)) && isequal(refBefore, local_bytes(reference)));
+    % Apply a properties-only plan through the GUI, then verify the refresh is empty.
+    config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
+        '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
+    config.SourceXlsx = source;
+    config.ProjectRoot = sandbox;
+    config.SlddFile = file;
+    config.ParametersFile = fullfile(sandbox, 'property-parameters.m');
+    configFile = fullfile(sandbox, 'property-config.json');
+    local_write(configFile, jsonencode(config));
+    fig = interface_tools_gui(struct('ConfigFile', configFile));
+    figCleanup = onCleanup(@() delete(fig));
+    button = findall(fig, 'Tag', 'PreviewSldd');
+    button.ButtonPushedFcn(button, []);
+    details = findall(fig, 'Tag', 'InterfaceDifferences');
+    assert(size(details.Data, 1) == preview.MetadataMismatch);
+    assert(all(strcmp(details.Data(:, 2), 'PROPERTY_DIFF')));
+    button = findall(fig, 'Tag', 'SelectChanges');
+    button.ButtonPushedFcn(button, []);
+    drawnow; pause(0.2);
+    exportapp(fig, fullfile(sandbox, 'gui-property-updates.png'));
+    button = findall(fig, 'Tag', 'SyncSldd');
+    assert(strcmp(button.Enable, 'on'));
+    button.ButtonPushedFcn(button, []);
+    assert(isempty(details.Data) && strcmp(button.Enable, 'off'));
+    clear figCleanup;
+    after = sync_bus_interfaces_from_excel(source, file, 'all', 'preview');
+    assert(isempty(after.Changes) && ~after.Saved);
+    dd = Simulink.dictionary.archdata.open(file);
+    bus = getInterface(dd, 'Properties');
+    assert(strcmp(getElement(bus, 'APlain').Dimensions, '[2 3]'));
+    assert(strcmp(getElement(bus, 'Named').Type.Minimum, '-10'));
+    assert(strcmp(getElement(bus, 'Peer').Type.DataType, 'double'));
+    assert(strcmp(getElement(bus, 'Peer').Type.Unit, 'm/s'));
+    assert(strcmp(getDataType(dd, 'Shared').Description, 'Old shared'));
+    assert(strcmp(getDataType(dd, 'Counter').BaseType, 'uint8'));
+    close(dd);
+    % Native save can rewrite reference bookkeeping when a type use is detached.
+    % Its definitions and elements must remain unchanged and clean.
+    ref = Simulink.dictionary.archdata.open(reference);
+    sharedRef = getDataType(ref, 'SharedRef');
+    assert(strcmp(sharedRef.DataType, 'double') && strcmp(sharedRef.Unit, 'm/s'));
+    assert(strcmp(sharedRef.Dimensions, '1') && isempty(sharedRef.Description) && ~isDirty(ref));
+    refElem = getElement(getInterface(ref, 'RefConsumer'), 'Keep');
+    assert(strcmp(refElem.Type.Name, 'SharedRef') && strcmp(refElem.Type.DataType, 'double'));
+    assert(strcmp(refElem.Type.Unit, 'm/s') && strcmp(refElem.Dimensions, '1'));
+    close(ref);
+    % Cross-sheet metadata conflicts must not silently choose one value to write.
+    writecell([rows(1, :); {'Properties', 'APlain', 'single', '2x3', 'm/s', 'New plain'}], ...
+        source, 'Sheet', 'Shared');
+    before = local_bytes(file);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'Sheet1', 'apply'), ...
+        'InterfaceTools:SourceConflict');
+    assert(isequal(before, local_bytes(file)));
+    clear cleanup refCleanup;
+    fprintf('PASS: property-only CLI/GUI, per-property selection, named/reference types, stale preview, rollback.\n');
+end
+
+function local_failAfterProperty(message, element)
+    if nargin < 2, element = 'Properties.APlain'; end
+    if contains(message, ['[~] ' element])
+        error('InterfaceTools:TestFailure', 'Simulated failure after property mutation.');
+    end
 end
 
 function local_expectError(action, identifier)

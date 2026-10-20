@@ -1,6 +1,6 @@
 function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts)
 %GENERATE_SIMULINK_PARAMETERS Export accepted Excel parameters to a .m script.
-% Version: 1.9.1 (Interface tools bundle).
+% Version: 1.10.0 (Interface tools bundle).
 %   generate_simulink_parameters('interfaces.xlsx', 'accepted_parameters.m')
 %   generate_simulink_parameters('interfaces.xlsx', 'params.m', 'HVBat')
 %   generate_simulink_parameters('interfaces.xlsx', 'params.m', ["HVBat","LVS"])
