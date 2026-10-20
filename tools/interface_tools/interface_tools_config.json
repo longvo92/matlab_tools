@@ -4,6 +4,5 @@
   "ProjectFolderName": "EBUS_12M",
   "ArchitectureFolder": "02_SWE2_Architecture_Design",
   "SlddFile": "02_SWE2_Architecture_Design/CVC_Architecture.sldd",
-  "ParametersFile": "02_SWE2_Architecture_Design/CVC_Parameters.m",
-  "ExportXlsx": "06_Tool/interface_tools/common/sldd_interface_export.xlsx"
+  "ParametersFile": "02_SWE2_Architecture_Design/CVC_Parameters.m"
 }

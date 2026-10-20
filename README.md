@@ -24,7 +24,7 @@
 | **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
-| **Interface tools** | `1.5.0` | Generates parameter M-files from Excel; previews every `bus.element` difference and syncs selected SLDD interfaces. Separate Parameter M-file and SLDD panels. | [Interface bundle](tools/interface_tools/) |
+| **Interface tools** | `1.10.1` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
 
@@ -80,7 +80,7 @@ Requires MATLAB/Simulink R2024a or later. Copy all three M-files and the JSON co
 from [`tools/interface_tools/`](tools/interface_tools/) into the same folder.
 
 Edit [interface_tools_config.json](tools/interface_tools/interface_tools_config.json)
-to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, `ParametersFile`, and `ExportXlsx`.
+to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, and `ParametersFile`.
 Use `/` or escaped `\\` in JSON paths. `SourceXlsx` and `ProjectRoot` are relative
 to the config folder; output paths are relative to the project root. Absolute
 paths are accepted.
@@ -98,22 +98,83 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 | Panel | Behavior |
 | --- | --- |
 | **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting the output. |
-| **SLDD interfaces** | Preview lists every `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`, with XLSX/SLDD property values. Sync confirms before applying additions/removals for selected sheets. Existing property differences remain report-only. |
+| **SLDD interfaces** | Preview compares Excel buses and lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick local additions/removals and individual property changes, then click **Apply selected**. Referenced interfaces remain read-only. |
 
-Preview leaves the SLDD unchanged but regenerates the export workbook. The sync
-backend also returns the complete differences table in `summary.Changes`.
+Preview reads **Data Interfaces in Architectural Data** directly from the
+configured SLDD. Only buses named in the selected Excel sheets are compared;
+other SLDD buses are ignored. For those buses, expected elements come from all
+workbook sheets to protect shared elements. Service/Physical Interfaces and
+buses in Design Data are excluded. Excel names matching Service/Physical Interfaces
+are ignored instead of becoming additions. No exporter or intermediate Excel is needed.
 
-SLDD actions require your project's **`sldd2excel_main`** exporter on the MATLAB
-path or beside `ExportXlsx`. It must run without arguments and export the configured
-target dictionary to the configured path. The exporter is not included;
-parameter generation works independently of it.
+ADD/REMOVE rows show `element` in Property. ADD shows the Excel definition and
+`<missing>` in SLDD; REMOVE shows `Status=remove` and the current SLDD definition.
+Definitions include DataType and dimensions (`<empty>` when blank), plus unit
+and description when provided. Full definitions also appear in the Activity log.
+PROPERTY_DIFF rows show each changed property separately. Apply updates the checked
+DataType, dimensions, Unit, and Description fields from Excel. Blank Excel fields
+remain unspecified. Unchecked fields are preserved. If an element uses a named
+or shared type, the tool creates an element-specific ValueType for its updated
+properties, preserving the original type and other elements that use it.
+Each element addition/removal still has one checkbox.
+
+The model list spans the wider SLDD panel. On short windows, the differences
+table keeps a minimum height; scroll the main window to reach the lower panels.
+The Activity log streams sheet reads,
+SLDD reads, comparison counts, element changes, parameter results, and warnings;
+it retains the full session history. **Follow latest** shows new messages at the top, so no repeated scrolling
+is needed. Turn it off to pause the view while reading earlier entries, then
+turn it on to catch up. The status line continues updating while the view is paused.
+
+Only Excel rows with **`Status = remove`** propose a deletion (case-insensitive,
+with surrounding spaces ignored). Missing/blank/other Status values and elements
+absent from Excel never authorize deletion. Remove rows do not create additions
+or property differences, and need no DataType. Conflicting remove/keep rows for
+the same compared `Bus.Element` across sheets stop comparison before any edits.
+Conflicting specified Unit/Description values across shared sheets are also
+rejected. Conflicts in buses outside the selected scope are ignored.
+
+Run **Preview differences**, tick individual **Apply** checkboxes, then click
+**Apply selected**. **Select all changes** and **Clear changes** sit at the left
+above the differences table, including in narrow windows. Checkboxes start cleared;
+**Select all changes** selects
+editable local ADD/REMOVE/PROPERTY_DIFF rows. Referenced interfaces cannot be
+selected. The table refreshes after Apply and clears the selection. Changing the workbook/sheets clears the preview. If compared data
+changes after Preview, including a change to remove Status, run Preview again
+before applying.
+
+```matlab
+preview = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');
+% Select element/property changes (indices into preview.Changes):
+rows = find(preview.Selectable); % Replace with the rows you want.
+opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes(rows, :), ...
+    'ExpectedSnapshot', {preview.Snapshot});
+summary = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', opts);
+```
+
+`summary.Changes` contains the complete differences table; `summary.Selectable`
+marks editable rows. `summary.Interfaces` lists matching Data Interfaces with
+name, element count, and reference status. `summary.SelectedAdd/SelectedRemove`
+count selected element changes; `Added/Removed` count element changes applied.
+`SelectedUpdate/Updated` count selected/applied individual property changes.
+For PROPERTY_DIFF selections, the table must include `Action`, `Interface`, and
+`Property`; multiple fields on one element can be selected independently.
+An empty `SelectedChanges` table applies nothing. CLI calls without this option
+retain apply-all behavior; `opts.Mode` defaults to preview. Both backends accept
+an optional `opts.LogFcn = @(message) ...` progress callback (fourth argument;
+parameter generation keeps its sheet selection as the third argument).
+
+Preview never edits or saves the SLDD. Apply protects pending edits in the
+dictionary and its references, keeps empty interfaces, and rolls back failed
+changes. Legacy five-argument calls and configs with `ExportXlsx` are accepted;
+the export path is ignored and never read, written, or deleted.
 
 ## Versioning
 
 Each tool uses its own **MAJOR.MINOR.PATCH** version: breaking changes, compatible
 features, and fixes. Find the current version in the feature table or with
 `help <functionName>`. The three interface M-files share one bundle version.
-The interface bundle continues the imported `1.4.1` version as `1.5.0`. Other
+The interface bundle continues the imported `1.4.1` version. Other
 tools begin their tracked history at `1.0.0`; signal naming adds its GUI in `1.1.0`.
 
 See [CHANGELOG.md](CHANGELOG.md) for each tool's version history.
