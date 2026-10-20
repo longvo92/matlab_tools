@@ -24,7 +24,7 @@
 | **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
-| **Interface tools** | `1.7.0` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element additions/removals to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
+| **Interface tools** | `1.8.0` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element additions/removals to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
 
@@ -106,12 +106,19 @@ other SLDD buses are ignored. For those buses, expected elements come from all
 workbook sheets to protect shared elements. Service/Physical Interfaces and
 buses in Design Data are excluded. No exporter or intermediate Excel is needed.
 
+Only Excel rows with **`Status = remove`** propose a deletion (case-insensitive,
+with surrounding spaces ignored). Missing/blank/other Status values and elements
+absent from Excel never authorize deletion. Remove rows do not create additions
+or property differences, and need no DataType. Conflicting remove/keep rows for
+the same `Bus.Element` across sheets stop comparison before any edits.
+
 Run **Preview differences**, tick individual **Apply** checkboxes, then click
 **Apply selected**. Checkboxes start cleared; **Select all changes** selects only
 editable local ADD/REMOVE rows. Existing property differences and referenced
 interfaces cannot be selected. The table refreshes after Apply and clears the
 selection. Changing the workbook/sheets clears the preview. If compared data
-changes after Preview, run Preview again before applying.
+changes after Preview, including a change to remove Status, run Preview again
+before applying.
 
 ```matlab
 preview = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');

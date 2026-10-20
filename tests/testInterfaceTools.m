@@ -27,6 +27,7 @@ function testInterfaceTools()
     for k = 1:35
         source(end+1, :) = {'BusA', sprintf('New%02d', k), 'double', '1', '', '', ''}; %#ok<AGROW>
     end
+    source(end+1, :) = {'BusA', 'Old', '', '', 'remove', '', ''};
     addElement(bus, 'Old');
     addElement(bus, 'Shared');
     other = addDataInterface(dd, 'BusB');
@@ -162,6 +163,7 @@ function testInterfaceTools()
     assert(rejected, 'Invalid config must fail before creating a GUI.');
     local_testDirectSnapshot(sandbox);
     local_testSelectedChanges(sandbox);
+    local_testStatusRemoval(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
 end
@@ -254,7 +256,7 @@ function local_testDirectSnapshot(sandbox)
     bus = getInterface(dd, 'Bus');
     addElement(bus, 'UserUnsaved');
     [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
-    assert(isDirty(dd) && any(strcmp(report.Changes.Interface, 'Bus.UserUnsaved')));
+    assert(isDirty(dd) && ~any(strcmp(report.Changes.Interface, 'Bus.UserUnsaved')));
     local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', 'apply'), ...
         'InterfaceTools:DirtyDictionary');
     assert(isDirty(dd) && numel(getInterface(dd, 'Bus').Elements) == 6);
@@ -300,8 +302,9 @@ function local_testSelectedChanges(sandbox)
     save(dd);
     close(dd);
     source = fullfile(sandbox, 'selected.xlsx');
-    rows = {'Bus', 'Element', 'DataType'; 'Selected', 'Keep', 'uint8'; ...
-        'Selected', 'AddA', 'double'; 'Selected', 'AddB', 'single'};
+    rows = {'Bus', 'Element', 'DataType', 'Status'; 'Selected', 'Keep', 'uint8', ''; ...
+        'Selected', 'AddA', 'double', ''; 'Selected', 'AddB', 'single', ''; ...
+        'Selected', 'RemoveA', '', 'remove'; 'Selected', 'RemoveB', '', 'remove'};
     writecell(rows, source);
     [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
     assert(report.ToAdd == 2 && report.ToRemove == 2 && report.MetadataMismatch == 1);
@@ -355,6 +358,61 @@ function local_testSelectedChanges(sandbox)
     assert(report.ToAdd == 1 && isempty(report.Interfaces));
     clear cleanup;
     fprintf('PASS: selected changes, empty/invalid selections, stale preview, Excel-only scope.\n');
+end
+
+function local_testStatusRemoval(sandbox)
+    file = fullfile(sandbox, 'status.sldd');
+    dd = Simulink.dictionary.archdata.create(file);
+    cleanup = onCleanup(@() local_close(dd));
+    bus = addDataInterface(dd, 'StatusBus');
+    names = {'AbsentFromExcel', 'Blank', 'Accepted', 'OtherStatus', 'Marked', 'Unchecked'};
+    for k = 1:numel(names), addElement(bus, names{k}); end
+    save(dd);
+    close(dd);
+    source = fullfile(sandbox, 'status.xlsx');
+    rows = {'Bus', 'Element', 'Status'; 'StatusBus', 'Blank', ''; ...
+        'StatusBus', 'Accepted', 'Accept'; 'StatusBus', 'OtherStatus', 'removed'; ...
+        'StatusBus', 'Marked', ' ReMoVe '; 'StatusBus', 'Unchecked', 'remove'; ...
+        'StatusBus', 'NotPresent', 'remove'; 'MissingBus', 'MissingElement', 'remove'};
+    writecell(rows, source, 'Sheet', 'Selected');
+    before = local_bytes(file);
+    [~, preview] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
+    assert(preview.ToAdd == 0 && preview.ToRemove == 2 && preview.MetadataMismatch == 0);
+    assert(all(strcmp(preview.Changes.Action, 'REMOVE')));
+    assert(all(ismember(preview.Changes.Interface, {'StatusBus.Marked', 'StatusBus.Unchecked'})));
+    chosen = strcmp(preview.Changes.Interface, 'StatusBus.Marked');
+    opts = struct('Mode', 'apply', 'SelectedChanges', preview.Changes(chosen, :), ...
+        'ExpectedSnapshot', {preview.Snapshot});
+    rows{5, 3} = '';
+    writecell(rows, source, 'Sheet', 'Selected');
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), ...
+        'InterfaceTools:StalePreview');
+    assert(isequal(before, local_bytes(file)));
+    rows{5, 3} = ' ReMoVe ';
+    writecell(rows, source, 'Sheet', 'Selected');
+    result = sync_bus_interfaces_from_excel(source, file, 'all', opts);
+    assert(result.Removed == 1 && result.Added == 0 && result.Saved);
+    dd = Simulink.dictionary.archdata.open(file);
+    remaining = string({getInterface(dd, 'StatusBus').Elements.Name});
+    assert(~any(remaining == 'Marked') && all(ismember(string(names(~strcmp(names, 'Marked'))), remaining)));
+    assert(~any(strcmp(getInterfaceNames(dd), 'MissingBus')));
+    close(dd);
+    [~, after] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
+    assert(after.ToAdd == 0 && after.ToRemove == 1);
+    % A conflicting keep row in another sheet must prevent deletion.
+    writecell({'Bus', 'Element', 'Status'; 'StatusBus', 'Unchecked', 'Accept'}, ...
+        source, 'Sheet', 'Shared');
+    before = local_bytes(file);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'Selected', 'apply'), ...
+        'InterfaceTools:SourceConflict');
+    assert(isequal(before, local_bytes(file)));
+    % Workbooks without Status never infer deletions from absent elements.
+    noStatus = fullfile(sandbox, 'no-status.xlsx');
+    writecell({'Bus', 'Element'; 'StatusBus', 'Blank'}, noStatus);
+    result = sync_bus_interfaces_from_excel(noStatus, file, 'all', 'apply');
+    assert(result.ToRemove == 0 && ~result.Saved && isequal(before, local_bytes(file)));
+    clear cleanup;
+    fprintf('PASS: explicit remove Status, missing Status, stale Status, shared conflicts, selected deletion.\n');
 end
 
 function local_expectError(action, identifier)

@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.7.0 (Interface tools bundle).
+% Version: 1.8.0 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -12,6 +12,7 @@ function fig = interface_tools_gui(opts)
 % Tick individual ADD/REMOVE rows, then Apply selected. Preview is required.
 % Property differences and referenced interfaces cannot be selected.
 % Only buses named in selected Excel sheets are compared.
+% REMOVE requires Status=remove in Excel; elements absent from Excel are kept.
 %
 % Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
 % SLDD operations read Data Interfaces directly from Architectural Data.
@@ -312,6 +313,7 @@ function fig = interface_tools_gui(opts)
                 detailLabel.Text = sprintf('%d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
                     previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch);
                 updateApplyState();
+                appendLog('REMOVE requires Status=remove in Excel; missing elements are kept.');
                 appendLog(sprintf('%d matching Data Interfaces; tick local ADD/REMOVE rows to apply.', ...
                     height(previewReport.Interfaces)));
             end

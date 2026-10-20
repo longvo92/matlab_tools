@@ -2,6 +2,14 @@
 
 ## Interface tools
 
+### 1.8.0 - 2026-10-20
+
+- Propose deletions only for Excel rows explicitly marked `Status=remove`;
+  keep elements absent from Excel or without that status. Matching ignores
+  case and surrounding spaces; remove rows never generate additions.
+- Require a fresh preview when remove Status changes, and stop on conflicting
+  remove/keep rows for the same element across sheets.
+
 ### 1.7.0 - 2026-10-20
 
 - Tick individual local element additions/removals in the preview table, select

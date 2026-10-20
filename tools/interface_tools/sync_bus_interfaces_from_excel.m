@@ -1,6 +1,6 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.7.0 (Interface tools bundle).
+% Version: 1.8.0 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
@@ -22,13 +22,16 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 % Legacy (source, sldd, sheets, exportXlsx, mode) calls remain accepted;
 % the export path is ignored and never read, written, or deleted.
 %
-% Reads Bus, Element, DataType, Dim, Unit, Description from the source XLSX,
+% Reads Bus, Element, Status, DataType, Dim, Unit, Description from the source XLSX,
 % and matching Data Interfaces from the specified SLDD and its references.
 % Service/Physical Interfaces and Design Data buses are excluded.
 % Compares in memory, then saves only successfully applied element changes.
 %
 % NOTES / SAFETY:
-%   - All valid source rows are included regardless of Status.
+%   - Only Status=remove (case-insensitive, trimmed) proposes a deletion.
+%     Missing/blank/other Status values never authorize removal. Elements
+%     absent from Excel are kept. Remove rows never propose additions.
+%   - Conflicting remove/keep rows for the same Bus.Element abort comparison.
 %   - A selected sheet identifies the affected buses. For those buses,
 %     expected elements are collected from ALL source sheets, protecting
 %     elements shared across sheets from accidental deletion.
@@ -67,7 +70,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.7.0\n');
+    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.8.0\n');
     fprintf('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
@@ -232,12 +235,18 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
                 'dimensions', getText(raw, r, cols.dimensions), ...
                 'unit', getText(raw, r, cols.unit), ...
                 'description', getText(raw, r, cols.description), ...
+                'removeRequested', strcmpi(getText(raw, r, cols.status), 'remove'), ...
                 'origin', sprintf('%s:%d', sheet, r));
             k = pairKey(bus, elem);
             if isKey(expected, k)
                 other = expected(k);
-                if ~strcmp(other.dataType, rec.dataType) || ...
-                   ~strcmp(normalDim(other.dimensions), normalDim(rec.dimensions))
+                if other.removeRequested ~= rec.removeRequested
+                    error('InterfaceTools:SourceConflict', ...
+                        'Conflicting remove/keep Status for %s.%s in %s and %s.', ...
+                        bus, elem, other.origin, rec.origin);
+                end
+                if ~rec.removeRequested && (~strcmp(other.dataType, rec.dataType) || ...
+                   ~strcmp(normalDim(other.dimensions), normalDim(rec.dimensions)))
                     error(['Source conflict for %s.%s in %s and %s: ' ...
                         'DataType or Dimensions differ.'], ...
                         bus, elem, other.origin, rec.origin);
@@ -276,6 +285,7 @@ function [actual, inventory] = local_readDataInterfaces(archData, scope)
                 'dataType', strtrim(dataType), ...
                 'dimensions', strtrim(char(elementObj.Dimensions)), ...
                 'unit', strtrim(unit), 'description', strtrim(char(elementObj.Description)), ...
+                'removeRequested', false, ...
                 'origin', names{i});
             actual(pairKey(rec.bus, rec.element)) = rec;
         end
@@ -286,7 +296,7 @@ function [actual, inventory] = local_readDataInterfaces(archData, scope)
 end
 
 function snapshot = local_createSnapshot(expected, actual, scope)
-    snapshot = cell(0, 7);
+    snapshot = cell(0, 8);
     inventories = {expected, actual};
     for side = 1:2
         inventory = inventories{side};
@@ -295,7 +305,7 @@ function snapshot = local_createSnapshot(expected, actual, scope)
             row = inventory(names{i});
             if ~isKey(scope, row.bus), continue; end
             snapshot(end+1, :) = {side, row.bus, row.element, row.dataType, ...
-                row.dimensions, row.unit, row.description}; %#ok<AGROW>
+                row.dimensions, row.unit, row.description, row.removeRequested}; %#ok<AGROW>
         end
     end
 end
@@ -336,6 +346,13 @@ function [addKeys, removeKeys, differences, compared, changes] = compareInterfac
         x = expected(k);
         if ~isKey(scope, x.bus), continue; end
         compared = compared + 1;
+        if x.removeRequested
+            if isKey(actual, k)
+                removeKeys{end+1} = k; %#ok<AGROW>
+                changes(end+1, :) = {'REMOVE', [x.bus '.' x.element], '', '', ''}; %#ok<AGROW>
+            end
+            continue; % Already absent: do not add or compare deletion-row metadata.
+        end
         if ~isKey(actual, k)
             addKeys{end+1} = k; %#ok<AGROW>
             changes(end+1, :) = {'ADD', [x.bus '.' x.element], '', '', ''}; %#ok<AGROW>
@@ -361,15 +378,6 @@ function [addKeys, removeKeys, differences, compared, changes] = compareInterfac
         end
     end
 
-    actualKeys = sort(keys(actual));
-    for i = 1:numel(actualKeys)
-        k = actualKeys{i};
-        x = actual(k);
-        if isKey(scope, x.bus) && ~isKey(expected, k)
-            removeKeys{end+1} = k; %#ok<AGROW>
-            changes(end+1, :) = {'REMOVE', [x.bus '.' x.element], '', '', ''}; %#ok<AGROW>
-        end
-    end
 end
 
 function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(archData, expected, addKeys, removeKeys)
@@ -485,7 +493,7 @@ end
 function [headerRow, cols] = detectHeaders(raw, required)
     headerRow = 0;
     cols = struct('bus', [], 'element', [], 'datatype', [], ...
-        'dimensions', [], 'unit', [], 'description', []);
+        'dimensions', [], 'unit', [], 'description', [], 'status', []);
     for r = 1:min(40, size(raw, 1))
         headers = strings(1, size(raw, 2));
         for c = 1:size(raw, 2)
@@ -506,6 +514,7 @@ function [headerRow, cols] = detectHeaders(raw, required)
         cols.dimensions = pickCol(headers, ["dim", "dimension", "dimensions"]);
         cols.unit = pickCol(headers, ["unit", "units"]);
         cols.description = pickCol(headers, "description");
+        cols.status = pickCol(headers, "status");
         return;
     end
 end
