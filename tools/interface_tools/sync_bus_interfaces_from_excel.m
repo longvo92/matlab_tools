@@ -1,11 +1,12 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.8.0 (Interface tools bundle).
+% Version: 1.9.0 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
 % summary.Interfaces inventories Data Interfaces in the selected Excel buses only.
 % summary.Selectable marks editable ADD/REMOVE rows in summary.Changes.
+% ADD/REMOVE rows include the element definition and missing/removal status.
 % Standalone backend; no exporter or intermediate workbook is needed.
 %
 %   sync_bus_interfaces_from_excel(sourceXlsx, slddFile)
@@ -19,6 +20,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 % opts.Mode defaults to preview. SelectedChanges is an Action/Interface table;
 % an empty selection applies nothing. Omit it to retain legacy apply-all behavior.
 % ExpectedSnapshot rejects changes to compared data since Preview.
+% opts.LogFcn is an optional @(message) callback for live progress messages.
 % Legacy (source, sldd, sheets, exportXlsx, mode) calls remain accepted;
 % the export path is ignored and never read, written, or deleted.
 %
@@ -64,14 +66,18 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         mode = modeOrLegacyExport;
     end
 
+    if isfield(opts, 'LogFcn') && ~isempty(opts.LogFcn)
+        validateattributes(opts.LogFcn, {'function_handle'}, {'scalar'});
+    end
+    logMessage = @(varargin) local_log(opts, varargin{:});
     mode = lower(strtrim(string(mode)));
     if ~isscalar(mode) || ~ismember(mode, ["apply", "preview"])
         error('mode must be "apply" or "preview".');
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    fprintf('[TOOL] sync_bus_interfaces_from_excel v1.8.0\n');
-    fprintf('[TOOL PATH] %s.m\n', mfilename('fullpath'));
+    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.9.0\n');
+    logMessage('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
     slddFile = existingFullPath(slddFile, 'SLDD');
@@ -80,7 +86,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     targetSheets = resolveSheets(selectedSheets, sourceSheets);
 
     % Read expected rows first; fail early on invalid source.
-    [expected, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets);
+    [expected, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets, logMessage);
 
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
@@ -89,14 +95,15 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary.Changes = cell2table(cell(0, 5), 'VariableNames', ...
         {'Action', 'Interface', 'Property', 'SourceValue', 'TargetValue'});
 
-    fprintf('[SOURCE] %s\n', xlsxFile);
-    fprintf('[SHEETS] %s\n', strjoin(targetSheets, ', '));
+    logMessage('[SOURCE] %s\n', xlsxFile);
+    logMessage('[SHEETS] %s\n', strjoin(targetSheets, ', '));
 
     wasOpen = any(strcmpi(Simulink.data.dictionary.getOpenDictionaryPaths(), slddFile));
+    logMessage('[OPEN SLDD] %s\n', slddFile);
     archData = Simulink.dictionary.archdata.open(slddFile);
     cleanup = onCleanup(@() local_closeDictionary(archData, wasOpen));
-    [actual, summary.Interfaces] = local_readDataInterfaces(archData, selectedBuses);
-    fprintf('[SLDD] %s: %d Data Interfaces, %d elements\n', ...
+    [actual, summary.Interfaces] = local_readDataInterfaces(archData, selectedBuses, logMessage);
+    logMessage('[SLDD] %s: %d Data Interfaces, %d elements\n', ...
         slddFile, height(summary.Interfaces), actual.Count);
     scope = selectedBuses;
     [addKeys, removeKeys, metadataDiff, compared, changes] = compareInterfaces(expected, actual, scope);
@@ -117,21 +124,21 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         error('InterfaceTools:StalePreview', 'Compared Excel or SLDD data changed. Run Preview again.');
     end
 
-    fprintf('[COMPARE] %d entries in selected buses; ADD=%d, REMOVE=%d, PROPERTY_DIFF=%d\n', ...
+    logMessage('[COMPARE] %d entries in selected buses; ADD=%d, REMOVE=%d, PROPERTY_DIFF=%d\n', ...
         compared, summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
-    printChanges('ADD', addKeys, expected, inf);
-    printChanges('REMOVE', removeKeys, actual, inf);
+    printChanges('ADD', addKeys, expected, inf, logMessage);
+    printChanges('REMOVE', removeKeys, actual, inf, logMessage);
     for i = 1:numel(metadataDiff)
-        fprintf('  [PROPERTY_DIFF] %s\n', metadataDiff{i});
+        logMessage('  [PROPERTY_DIFF] %s\n', metadataDiff{i});
     end
 
     % Matching keys and metadata-only differences never trigger writes.
     if isempty(addKeys) && isempty(removeKeys)
-        fprintf('[UNCHANGED] No Bus/Element additions or deletions. SLDD untouched.\n');
+        logMessage('[UNCHANGED] No Bus/Element additions or deletions. SLDD untouched.\n');
         return;
     end
     if mode == "preview"
-        fprintf('[PREVIEW] Differences found, but SLDD was NOT modified.\n');
+        logMessage('[PREVIEW] Differences found, but SLDD was NOT modified.\n');
         return;
     end
 
@@ -141,7 +148,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     summary.SelectedAdd = numel(addKeys);
     summary.SelectedRemove = numel(removeKeys);
     if isempty(addKeys) && isempty(removeKeys)
-        fprintf('[UNCHANGED] No changes selected.\n');
+        logMessage('[UNCHANGED] No changes selected.\n');
         return;
     end
     checked = containers.Map('KeyType', 'char', 'ValueType', 'logical');
@@ -160,14 +167,14 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     try
         [summary.Added, summary.Removed, summary.NewInterfaces, ...
             summary.ReferencedSkipped] = applyDifferences(archData, ...
-            expected, addKeys, removeKeys);
+            expected, addKeys, removeKeys, logMessage);
 
         if summary.Added > 0 || summary.Removed > 0
             save(archData);
             summary.Saved = true;
-            fprintf('[SAVED] Architectural Data -> %s\n', slddFile);
+            logMessage('[SAVED] Architectural Data -> %s\n', slddFile);
         else
-            fprintf('[UNCHANGED] No editable differences in target SLDD.\n');
+            logMessage('[UNCHANGED] No editable differences in target SLDD.\n');
         end
     catch ME
         % Do not save a partially modified dictionary on failure.
@@ -177,7 +184,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
         end
         rethrow(ME);
     end
-    fprintf('[DONE] Added=%d, Removed=%d, NewInterfaces=%d, ReferencedSkipped=%d\n', ...
+    logMessage('[DONE] Added=%d, Removed=%d, NewInterfaces=%d, ReferencedSkipped=%d\n', ...
         summary.Added, summary.Removed, summary.NewInterfaces, ...
         summary.ReferencedSkipped);
 end
@@ -202,12 +209,13 @@ function local_requireCleanDictionary(file, checked)
     end
 end
 
-function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets)
+function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets, logMessage)
     expected = containers.Map('KeyType', 'char', 'ValueType', 'any');
     selectedBuses = containers.Map('KeyType', 'char', 'ValueType', 'logical');
 
     for i = 1:numel(sheets)
         sheet = sheets{i};
+        logMessage('[READ XLSX] %d/%d: %s\n', i, numel(sheets), sheet);
         raw = readcell(file, 'Sheet', sheet);
         [headerRow, cols] = detectHeaders(raw, {'Bus', 'Element'});
         if headerRow == 0
@@ -259,7 +267,7 @@ function [expected, selectedBuses] = readSourceWorkbook(file, sheets, selectedSh
     end
 end
 
-function [actual, inventory] = local_readDataInterfaces(archData, scope)
+function [actual, inventory] = local_readDataInterfaces(archData, scope, logMessage)
     actual = containers.Map('KeyType', 'char', 'ValueType', 'any');
     rows = cell(0, 3);
     names = sort(getInterfaceNames(archData));
@@ -269,6 +277,8 @@ function [actual, inventory] = local_readDataInterfaces(archData, scope)
         interfaceObj = getInterface(archData, names{i});
         if ~isa(interfaceObj, 'Simulink.dictionary.archdata.DataInterface'), continue; end
         elements = interfaceObj.Elements;
+        logMessage('[READ SLDD] %s: %d elements, referenced=%d\n', ...
+            names{i}, numel(elements), ~ismember(names{i}, localNames));
         rows(end+1, :) = {names{i}, numel(elements), ~ismember(names{i}, localNames)}; %#ok<AGROW>
         for j = 1:numel(elements)
             elementObj = elements(j);
@@ -349,13 +359,15 @@ function [addKeys, removeKeys, differences, compared, changes] = compareInterfac
         if x.removeRequested
             if isKey(actual, k)
                 removeKeys{end+1} = k; %#ok<AGROW>
-                changes(end+1, :) = {'REMOVE', [x.bus '.' x.element], '', '', ''}; %#ok<AGROW>
+                changes(end+1, :) = {'REMOVE', [x.bus '.' x.element], ...
+                    'element', 'Status=remove', local_describeElement(actual(k))}; %#ok<AGROW>
             end
             continue; % Already absent: do not add or compare deletion-row metadata.
         end
         if ~isKey(actual, k)
             addKeys{end+1} = k; %#ok<AGROW>
-            changes(end+1, :) = {'ADD', [x.bus '.' x.element], '', '', ''}; %#ok<AGROW>
+            changes(end+1, :) = {'ADD', [x.bus '.' x.element], ...
+                'element', local_describeElement(x), '<missing>'}; %#ok<AGROW>
         else
             y = actual(k);
             fields = {'dataType', 'dimensions', 'unit', 'description'};
@@ -380,7 +392,7 @@ function [addKeys, removeKeys, differences, compared, changes] = compareInterfac
 
 end
 
-function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(archData, expected, addKeys, removeKeys)
+function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(archData, expected, addKeys, removeKeys, logMessage)
     added = 0;
     removed = 0;
     newInterfaces = 0;
@@ -403,6 +415,8 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
         bus = changedBuses{b};
         busAdd = filterKeysForBus(addKeys, bus);
         busRemove = filterKeysForBus(removeKeys, bus);
+        logMessage('[APPLY] %s: %d selected additions, %d selected removals\n', ...
+            bus, numel(busAdd), numel(busRemove));
 
         if any(strcmp(localNames, bus))
             interfaceObj = getInterface(archData, bus);
@@ -410,6 +424,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
                 error('Interface "%s" is not a DataInterface; cannot sync.', bus);
             end
         elseif any(strcmp(allNames, bus))
+            logMessage('[SKIP] %s belongs to a referenced SLDD; no edits.\n', bus);
             warning('Interface "%s" is defined in a referenced SLDD. Skipped.', bus);
             referencedSkipped = referencedSkipped + numel(busAdd) + numel(busRemove);
             continue;
@@ -421,7 +436,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
             newInterfaces = newInterfaces + 1;
             localNames(end+1) = string(bus); %#ok<AGROW>
             allNames(end+1) = string(bus); %#ok<AGROW>
-            fprintf('  [NEW INTERFACE] %s\n', bus);
+            logMessage('  [NEW INTERFACE] %s\n', bus);
         end
 
         for i = 1:numel(busAdd)
@@ -442,7 +457,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
             if ~isempty(row.unit), elementObj.Type.Unit = row.unit; end
             if ~isempty(row.description), elementObj.Description = row.description; end
             added = added + 1;
-            fprintf('  [+] %s.%s\n', bus, row.element);
+            logMessage('  [+] %s.%s\n', bus, row.element);
         end
 
         for i = 1:numel(busRemove)
@@ -452,7 +467,7 @@ function [added, removed, newInterfaces, referencedSkipped] = applyDifferences(a
             end
             removeElement(interfaceObj, elemName);
             removed = removed + 1;
-            fprintf('  [-] %s.%s\n', bus, elemName);
+            logMessage('  [-] %s.%s\n', bus, elemName);
         end
     end
 end
@@ -480,13 +495,13 @@ function elem = getElementFromKey(k)
     elem = k(p+1:end);
 end
 
-function printChanges(tag, changeKeys, inventory, limit)
+function printChanges(tag, changeKeys, inventory, limit, logMessage)
     for i = 1:min(limit, numel(changeKeys))
         x = inventory(changeKeys{i});
-        fprintf('  [%s] %s.%s\n', tag, x.bus, x.element);
+        logMessage('  [%s] %s.%s: %s\n', tag, x.bus, x.element, local_describeElement(x));
     end
     if numel(changeKeys) > limit
-        fprintf('  ... %d more %s entries.\n', numel(changeKeys)-limit, tag);
+        logMessage('  ... %d more %s entries.\n', numel(changeKeys)-limit, tag);
     end
 end
 
@@ -597,4 +612,26 @@ function out = existingFullPath(file, label)
     [ok, info] = fileattrib(file);
     if ~ok, error('Cannot resolve path: %s', file); end
     out = info.Name;
+end
+
+function description = local_describeElement(row)
+    fields = {'dataType', 'dimensions', 'unit', 'description'};
+    labels = {'DataType', 'Dim', 'Unit', 'Description'};
+    values = cell(1, numel(fields));
+    for i = 1:numel(fields)
+        value = row.(fields{i});
+        if i > 2 && isempty(value), continue; end
+        if isempty(value), value = '<empty>'; end
+        value = regexprep(value, '[\r\n]+', ' ');
+        values{i} = sprintf('%s=%s', labels{i}, value);
+    end
+    description = strjoin(values(~cellfun(@isempty, values)), '; ');
+end
+
+function local_log(opts, format, varargin)
+    message = sprintf(format, varargin{:});
+    fprintf('%s', message);
+    if isfield(opts, 'LogFcn') && ~isempty(opts.LogFcn)
+        opts.LogFcn(strtrim(message));
+    end
 end

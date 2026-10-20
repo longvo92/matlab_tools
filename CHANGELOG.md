@@ -2,6 +2,15 @@
 
 ## Interface tools
 
+### 1.9.0 - 2026-10-20
+
+- Show element definitions in ADD/REMOVE rows, including Excel values, missing
+  SLDD elements, removal Status, and current SLDD metadata.
+- Stream detailed backend progress and warnings into a larger Activity log,
+  retain all session messages, and add Follow latest with pause/resume.
+- Enlarge the model selector across the wider SLDD panel and move sheet
+  selection buttons below the list.
+
 ### 1.8.0 - 2026-10-20
 
 - Propose deletions only for Excel rows explicitly marked `Status=remove`;
