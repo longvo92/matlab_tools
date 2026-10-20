@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.10.0 (Interface tools bundle).
+% Version: 1.10.1 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -39,8 +39,9 @@ function fig = interface_tools_gui(opts)
     windowSize = [min(1180, screen(3)-80), min(920, screen(4)-100)];
 
     fig = uifigure('Name', 'CVC Interface Tools', ...
-        'Position', [40 40 windowSize], 'Color', [0.97 0.98 0.99]);
-    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 28, 220, 180}, ...
+        'Position', [40 40 windowSize], 'Color', [0.97 0.98 0.99], ...
+        'AutoResizeChildren', 'off');
+    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 32, 220, 180}, ...
         'Padding', [16 12 16 12], 'RowSpacing', 8, 'Scrollable', 'on');
     fig.SizeChangedFcn = @(~, ~) resizeLayout();
     resizeLayout();
@@ -99,13 +100,20 @@ function fig = interface_tools_gui(opts)
     inputControls = [excelEdit, browseButton, sheetList, selectButton, clearButton];
 
     detailHeader = uigridlayout(layout, [1 3], ...
-        'ColumnWidth', {'1x', 130, 110}, 'Padding', [0 0 0 0]);
+        'ColumnWidth', {145, 120, '1x'}, 'RowHeight', {32}, ...
+        'Padding', [0 0 0 0], 'ColumnSpacing', 8);
     detailLabel = uilabel(detailHeader, 'Text', 'Run Preview, then tick changes to apply.', ...
         'FontWeight', 'bold');
+    detailLabel.Layout.Row = 1;
+    detailLabel.Layout.Column = 3;
     selectChangesButton = uibutton(detailHeader, 'Text', 'Select all changes', 'Tag', 'SelectChanges', ...
         'ButtonPushedFcn', @(~, ~) selectChanges(true));
+    selectChangesButton.Layout.Row = 1;
+    selectChangesButton.Layout.Column = 1;
     clearChangesButton = uibutton(detailHeader, 'Text', 'Clear changes', 'Tag', 'ClearChanges', ...
         'ButtonPushedFcn', @(~, ~) selectChanges(false));
+    clearChangesButton.Layout.Row = 1;
+    clearChangesButton.Layout.Column = 2;
     detailTable = uitable(layout, 'Tag', 'InterfaceDifferences', ...
         'Data', cell(0, 6), 'ColumnName', {'Apply', 'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
         'ColumnFormat', {'logical', 'char', 'char', 'char', 'char', 'char'}, ...
@@ -132,7 +140,7 @@ function fig = interface_tools_gui(opts)
     % ------------------------------------------------------------
     function resizeLayout()
         % Keep the table usable on short displays; overflow scrolls as a whole.
-        fixedHeight = 28 + 72 + 320 + 28 + 180 + 24 + 5*8;
+        fixedHeight = 28 + 72 + 320 + 32 + 180 + 24 + 5*8;
         layout.RowHeight{5} = max(220, fig.Position(4) - fixedHeight);
     end
 

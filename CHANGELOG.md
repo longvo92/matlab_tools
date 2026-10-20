@@ -2,6 +2,12 @@
 
 ## Interface tools
 
+### 1.10.1 - 2026-10-20
+
+- Keep Select all changes and Clear changes at the left above the differences
+  table with explicit positions and fixed widths, including in narrow windows.
+- Enable the resize callback so the differences table uses available window height.
+
 ### 1.10.0 - 2026-10-20
 
 - Apply checked DataType, dimensions, Unit, and Description differences in both

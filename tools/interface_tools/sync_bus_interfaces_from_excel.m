@@ -1,6 +1,6 @@
 function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSheets, modeOrLegacyExport, mode)
 %SYNC_BUS_INTERFACES_FROM_EXCEL Compare Excel with SLDD Data Interfaces directly.
-% Version: 1.10.0 (Interface tools bundle).
+% Version: 1.10.1 (Interface tools bundle).
 %
 % Requires MATLAB/Simulink R2024a+. Reads ARCHITECTURAL DATA Data Interfaces.
 % Returns summary.Changes: complete Action/Interface/Property/SourceValue/TargetValue table.
@@ -79,7 +79,7 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     end
 
     % Helps detect an older copy of this tool earlier on MATLAB's path.
-    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.10.0\n');
+    logMessage('[TOOL] sync_bus_interfaces_from_excel v1.10.1\n');
     logMessage('[TOOL PATH] %s.m\n', mfilename('fullpath'));
 
     xlsxFile = existingFullPath(xlsxFile, 'Source XLSX');
