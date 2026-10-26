@@ -1,5 +1,15 @@
 # Tool version history
 
+## AUTOSAR address mapping
+
+### 1.0.0 - 2026-10-26
+
+- Manage one SwAddrMethod per AUTOSAR mapping type and model through CSV rules.
+- Preview or apply runnable, runnable internal data, parameter, signal, state,
+  and data-store mappings while preserving their types and other properties.
+- Validate rules and method section types before changes; verify applied values
+  and attempt rollback on failure. Model saving remains explicit.
+
 ## Interface tools
 
 ### 1.10.2 - 2026-10-26

@@ -12,6 +12,7 @@
   <a href="#features">Features</a> &middot;
   <a href="#quick-start">Quick start</a> &middot;
   <a href="#interface-tools">Interface tools</a> &middot;
+  <a href="#autosar-mapping">AUTOSAR mapping</a> &middot;
   <a href="https://github.com/longvo92/matlab_tools/issues">Issues</a> &middot;
   <a href="#versioning">Versions</a> &middot;
   <a href="#license">License</a>
@@ -25,12 +26,14 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
+| **AUTOSAR address mapping** | `1.0.0` | Preview/apply one SwAddrMethod per AUTOSAR mapping type in each model, using a shared CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
 Copy the tool you need into a folder on your MATLAB path. No package installation
 or shared repository helpers are needed. Keep adjacent JSON files with their tools;
-copy the entire interface bundle when using its GUI.
+copy the entire interface bundle when using its GUI. Copy the entire AUTOSAR
+mapping folder, including `+autosarMapping`, when using address mapping.
 
 ```matlab
 % Preview signal naming changes in the current system
@@ -79,6 +82,63 @@ empty prefix or `useLeafName=false` remain accepted; active legacy values raise
 These are MATLAB/Simulink tools. Python 3.12 is used only by the
 [CI lint workflow](.github/workflows/matlab-lint.yml), which runs MISS_HIT without
 a MATLAB license.
+
+## AUTOSAR mapping
+
+Requires MATLAB/Simulink R2024a or later, AUTOSAR Blockset, and a loaded AUTOSAR
+Classic component model. Edit [autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv),
+or create a CSV with exactly these columns:
+
+```csv
+Model,Type,SwAddrMethod
+MotorCtrl,Runnable,CODE
+MotorCtrl,ConstantMemory,CONST
+MotorCtrl,SharedParameter,CONST
+MotorCtrl,StaticMemory,VAR
+MotorCtrl,ArTypedPerInstanceMemory,VAR
+BatteryCtrl,Runnable,BATTERY_CODE
+```
+
+Each `(Model, Type)` occurs once. Model names are exact and case-sensitive,
+without folders or `.slx`; types ignore case. All explicit mappings of a type
+in that model use the same method. `StaticMemory` and `ArTypedPerInstanceMemory`
+cover registered signals, states, and Data Store Memory blocks. Parameters
+come from the model workspace; parameter arguments and port parameters are
+outside this version's scope. Auto mappings and types without a rule are listed
+and left unchanged. Referenced models need their own calls and rules.
+
+```matlab
+addpath('tools/autosar_mapping')
+load_system('MotorCtrl')
+r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv');
+disp(r.Elements) % Review Current, Desired, Status, and Reason.
+r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv', struct('Mode', 'apply'));
+save_system('MotorCtrl') % Explicitly save after reviewing the changes.
+```
+
+Use `[]` for the current model, or pass a rules table instead of a CSV.
+`readAutosarMappingRules` reads and validates the configuration independently.
+CSV files resolve in the current folder, then on the MATLAB path.
+`r.Rules.Matched` exposes rules with no matching elements; `r.Compliant` requires
+every rule to match and every configured element to have the desired method.
+Apply preserves the mapping type, runnable name, calibration settings, and other
+attributes, verifies the result, and attempts rollback on failure. Exceptions
+include any rollback failures; inspect the model before saving after an error.
+The tool never saves the model or updates referenced models.
+
+Methods must already exist in the model with unique SHORT-NAMEs. SectionType
+must be `Code` for Runnable, `Const` for ConstantMemory, `Const` or `Calprm` for
+SharedParameter, and `Var` for variable memory. The optional
+`RunnableInternalData` type requires `GroupInternalDataByFunction='on'` and a
+`Var` method. Initialize, terminate, and reset functions have no configurable
+internal-data method and are reported as ignored. Unsupported or ambiguous
+rules stop the operation before any mapping changes.
+
+This version uses existing element mappings supported by R2024a. It does not
+set the model-wide InternalData/Constants defaults introduced in R2026b. The
+native API workflow is described in [MathWorks AUTOSAR data configuration](https://www.mathworks.com/help/autosar/ug/configure-autosar-data-for-measurement-and-calibration.html).
+Run `tests/testAutosarMapping.m` for native fixture coverage and failure recovery
+tests; production-model code generation remains a separate validation step.
 
 ## Interface tools
 
