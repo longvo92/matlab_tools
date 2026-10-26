@@ -1,6 +1,104 @@
 # Tool version history
 
+## AUTOSAR Code Mappings
+
+### 1.2.0 - 2026-10-26
+
+- Share calibration naming regexp across models through a separate JSON config,
+  with include/exclude patterns, case control, role preservation and model CSV
+  overrides. Select matching parameter names with `calibration:*`.
+- Add a simple GUI for model/config selection, CSV export, preview and apply.
+  Use the same backend as CLI and reject changes to model/config inputs after
+  preview. Changes remain in memory until explicitly saved.
+
+### 1.1.0 - 2026-10-26
+
+- Export and configure property rules for every AUTOSAR Classic Code Mappings
+  category exposed by the supported mapping API, including implicit/explicit,
+  queued, E2E, mode-switch, client/server and inter-runnable mappings.
+- Manage memory roles, model parameter arguments, calibration and NVRAM
+  attributes, signal/store registration, internal-data packaging and E2E defaults.
+- Apply coupled settings together, verify configured mappings, and restore full
+  readable settings on failure. Keep the original SwAddrMethod CSV API available.
+
+### 1.0.0 - 2026-10-26
+
+- Manage one SwAddrMethod per AUTOSAR mapping type and model through CSV rules.
+- Preview or apply runnable, runnable internal data, parameter, signal, state,
+  and data-store mappings while preserving their types and other properties.
+- Validate rules and method section types before changes; verify applied values
+  and attempt rollback on failure. Model saving remains explicit.
+
 ## Interface tools
+
+### 1.10.2 - 2026-10-26
+
+- Generate correct numeric values and preserve multiline descriptions; keep the
+  previous parameter file if generation fails.
+- Detect sheets beyond column AZ and sync exactly the selected sheets.
+- Keep the GUI open during an operation so closing cannot interrupt its controls.
+- Use neutral interface window titles and configurable project defaults.
+
+### 1.10.1 - 2026-10-20
+
+- Keep Select all changes and Clear changes at the left above the differences
+  table with explicit positions and fixed widths, including in narrow windows.
+- Enable the resize callback so the differences table uses available window height.
+
+### 1.10.0 - 2026-10-20
+
+- Apply checked DataType, dimensions, Unit, and Description differences in both
+  CLI and GUI, including plans containing only property changes. Leave unchecked
+  and unspecified fields intact; keep referenced interfaces read-only.
+- Preserve shared type definitions by copying named types into an element-specific
+  ValueType when changing one element. Show property update counts in the log.
+- Reject conflicting Unit/Description values for compared elements across sheets.
+
+### 1.9.1 - 2026-10-20
+
+- Keep the differences table usable on short windows with a minimum height and
+  scrolling for overflowing panels.
+- Ignore Excel buses matching Service/Physical Interfaces during comparison and
+  Apply, so they cannot block valid element changes.
+- Ignore conflicting rows outside the selected bus scope while retaining
+  cross-sheet validation for compared buses.
+
+### 1.9.0 - 2026-10-20
+
+- Show element definitions in ADD/REMOVE rows, including Excel values, missing
+  SLDD elements, removal Status, and current SLDD metadata.
+- Stream detailed backend progress and warnings into a larger Activity log,
+  retain all session messages, and add Follow latest with pause/resume.
+- Enlarge the model selector across the wider SLDD panel and move sheet
+  selection buttons below the list.
+
+### 1.8.0 - 2026-10-20
+
+- Propose deletions only for Excel rows explicitly marked `Status=remove`;
+  keep elements absent from Excel or without that status. Matching ignores
+  case and surrounding spaces; remove rows never generate additions.
+- Require a fresh preview when remove Status changes, and stop on conflicting
+  remove/keep rows for the same element across sheets.
+
+### 1.7.0 - 2026-10-20
+
+- Tick individual local element additions/removals in the preview table, select
+  all or clear them, then apply only those changes. Property differences and
+  referenced interfaces remain report-only.
+- Compare only buses named in selected Excel sheets; ignore other SLDD buses.
+- Refresh the table after Apply and reject stale previews if compared data
+  changes. CLI options support the same selection and preview validation.
+
+### 1.6.0 - 2026-10-20
+
+- Compare Excel directly with every Architectural Data Data Interface, including
+  references, nested/typed elements, and an inventory of empty interfaces.
+- Remove the external exporter and intermediate Excel dependency from CLI and GUI;
+  retain legacy calls/configs without touching their export paths.
+- Include SLDD-only elements in all-sheet comparisons, retaining buses outside
+  selected sheets and keeping referenced interfaces report-only.
+- Protect unsaved dictionary edits during Preview/Apply and discard partial sync
+  changes if an addition fails.
 
 ### 1.5.0 - 2026-10-19
 
@@ -13,19 +111,18 @@
 
 ## Bus element signal naming
 
-### 2.0.2 - 2026-10-20
+### 2.0.2 - 2026-10-26
 
-- Fix index errors in models containing Function Element Call or Function
-  Element blocks by skipping bus-element blocks without data ports in CLI and
-  GUI. Continue naming data signals, including Function Caller data outputs,
-  without changing function prototypes or function element definitions.
+- Skip Function Element Call / Function Element blocks without data ports in
+  CLI and GUI; continue naming Function Caller data outputs without changing
+  function prototypes or function element definitions.
+- Stop Out Bus Element tracing at Signal Conversion/Signal Copy and Signal
+  Specification outputs, and preserve first In Bus Element propagation settings.
 
-### 2.0.1 - 2026-10-20
+### 2.0.1 - 2026-10-26
 
-- Stop Out Bus Element upstream tracing at Signal Conversion (including Signal
-  Copy) and Signal Specification, and name their output line.
-- Name the first In Bus Element line without enabling Show propagated, including
-  direct Out Bus connections and intermediate trace paths. Preserve existing settings.
+- Follow Simulink's resolved Goto visibility in CLI and GUI, preventing changes
+  to unrelated signals with the same tag in other subsystems.
 
 ### 2.0.0 - 2026-10-19
 
@@ -50,12 +147,23 @@
 
 ## Forbidden block checker
 
+### 1.0.1 - 2026-10-26
+
+- Stop incomplete referenced-model checks instead of returning a passing result.
+- Report single violations consistently with multiple-violation reports.
+
 ### 1.0.0 - 2026-10-19
 
 - Establish the first tracked version of the existing JSON-configured checker:
   check models and references, report warnings, and stop on active violations.
 
 ## Quick simulation setup
+
+### 1.0.1 - 2026-10-26
+
+- Resolve and verify SLDD files outside the MATLAB path, adding their folder to
+  the session path and reporting the resolved dictionary path.
+- Leave the model unlinked and restore the session path when linking fails.
 
 ### 1.0.0 - 2026-10-19
 

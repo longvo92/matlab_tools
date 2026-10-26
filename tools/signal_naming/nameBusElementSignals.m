@@ -28,6 +28,7 @@ function report = nameBusElementSignals(sys, opts)
 %     .recurse             (true)  also scan subsystems below SYS
 %     .traceThroughGoto    (true)  trace From -> Goto when tracing an Out
 %                                  Bus Element upstream
+%                                  using Simulink's resolved tag visibility
 %     .traceIntoSubsystem  (true)  descend into SubSystem blocks when tracing
 %     .propagate           (true)  enable propagated labels on the source output port
 %                                  of the line into the Out Bus Element port
@@ -209,16 +210,15 @@ end
 
 function gt = local_findMatchingGoto(fromBlk)
     gt     = '';
-    tag    = get_param(fromBlk, 'GotoTag');
-    parent = get_param(fromBlk, 'Parent');
-    cand = find_system(parent, 'SearchDepth', 1, 'LookUnderMasks', 'all', ...
-        'FollowLinks', 'on', 'BlockType', 'Goto', 'GotoTag', tag);
-    if isempty(cand)
-        cand = find_system(bdroot(fromBlk), 'LookUnderMasks', 'all', ...
-            'FollowLinks', 'on', 'BlockType', 'Goto', 'GotoTag', tag);
-    end
-    if ~isempty(cand)
-        gt = cand{1};
+    try
+        % Tag text alone cannot distinguish local, scoped and global routes.
+        match = get_param(fromBlk, 'GotoBlock');
+        if isstruct(match) && isfield(match, 'handle') && ...
+                isscalar(match.handle) && match.handle ~= -1
+            gt = getfullname(match.handle);
+        end
+    catch
+        % Unresolved/invalid routing must never fall back to an unrelated tag.
     end
 end
 

@@ -1,6 +1,6 @@
 function [model, report] = quickSimEnv(varargin)
 %QUICKSIMENV Spin up a fresh model, load data files, link a data dictionary, and grab a config set.
-% Version: 1.0.0 (Quick simulation setup).
+% Version: 1.0.1 (Quick simulation setup).
 %
 %   Fast pre-run setup in one call:
 %     1. Creates a new empty model and opens it (like Ctrl+N).
@@ -33,7 +33,7 @@ function [model, report] = quickSimEnv(varargin)
 %                            that loaded; modelVars and baseVars list the variables
 %                            that went to the model workspace and the base workspace
 %                  .skipped  struct array (name, reason) of files that did not
-%                  .sldd     data dictionary linked, '' if none
+%                  .sldd     resolved path of the dictionary linked, '' if none
 %                  .config   base workspace config variable linked, '' if none
 %
 %   Where .mat variables go:
@@ -54,6 +54,9 @@ function [model, report] = quickSimEnv(varargin)
 %   missing, has an unsupported extension, or errors is reported as skipped with a
 %   warning, the rest still load, and the model and config work is still done. A
 %   model links a single dictionary; if several are named the first wins.
+%   Linking an external dictionary adds its folder to this session's MATLAB
+%   path so the model can resolve the dictionary by name. Failed links restore
+%   the previous path and leave the model unlinked.
 %
 %   The config set is found automatically: the first base workspace variable of
 %   class Simulink.ConfigSet (or Simulink.ConfigSetRef) is used. If none exists,
@@ -331,14 +334,25 @@ function linked = local_linkSldd(model, reqs)
         return;
     end
 
-    [~, n, e] = fileparts(dictPath);
-    dd = [n e];   % DataDictionary takes the file name; it is resolved via the path
+    [dictionaryFolder, name, extension] = fileparts(dictPath);
+    dictionaryName = [name extension];
+    previousPath = path;
     try
-        set_param(model, 'DataDictionary', dd);
-        linked = dd;
-        fprintf('Linked data dictionary ''%s'' to %s.\n', dd, model);
+        % R2024a DataDictionary accepts a name, not an absolute file path.
+        addpath(dictionaryFolder);
+        dictionary = Simulink.data.dictionary.open(dictPath);
+        dictPath = dictionary.filepath;
+        set_param(model, 'DataDictionary', dictionaryName);
+        resolved = Simulink.data.dictionary.open(get_param(model, 'DataDictionary'));
+        if ~strcmp(resolved.filepath, dictionary.filepath)
+            error('quickSimEnv:dictionaryMismatch', 'The model resolved a different data dictionary.');
+        end
+        linked = dictPath;
+        fprintf('Linked data dictionary ''%s'' to %s.\n', dictPath, model);
     catch err
-        warning('quickSimEnv:slddLink', 'Could not link ''%s'': %s', dd, err.message);
+        set_param(model, 'DataDictionary', '');
+        path(previousPath);
+        warning('quickSimEnv:slddLink', 'Could not link ''%s'': %s', dictPath, err.message);
     end
 end
 
