@@ -1,0 +1,6 @@
+Model,Category,Element,Property,Value
+MotorCtrl,Inports,*,DataAccessMode,ExplicitReceive
+MotorCtrl,Outports,*,DataAccessMode,ExplicitSend
+MotorCtrl,Signals,type:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,States,type:ArTypedPerInstanceMemory,SwAddrMethod,VAR
+MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal

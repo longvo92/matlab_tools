@@ -1,6 +1,16 @@
 # Tool version history
 
-## AUTOSAR address mapping
+## AUTOSAR Code Mappings
+
+### 1.1.0 - 2026-10-26
+
+- Export and configure property rules for every AUTOSAR Classic Code Mappings
+  category exposed by the supported mapping API, including implicit/explicit,
+  queued, E2E, mode-switch, client/server and inter-runnable mappings.
+- Manage memory roles, model parameter arguments, calibration and NVRAM
+  attributes, signal/store registration, internal-data packaging and E2E defaults.
+- Apply coupled settings together, verify configured mappings, and restore full
+  readable settings on failure. Keep the original SwAddrMethod CSV API available.
 
 ### 1.0.0 - 2026-10-26
 

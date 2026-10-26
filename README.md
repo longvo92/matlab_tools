@@ -26,14 +26,14 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
-| **AUTOSAR address mapping** | `1.0.0` | Preview/apply one SwAddrMethod per AUTOSAR mapping type in each model, using a shared CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
+| **AUTOSAR Code Mappings** | `1.1.0` | Export, preview and apply per-model CSV rules for access modes, port/function mappings, memory roles, calibration/NVRAM attributes and defaults. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
 Copy the tool you need into a folder on your MATLAB path. No package installation
 or shared repository helpers are needed. Keep adjacent JSON files with their tools;
 copy the entire interface bundle when using its GUI. Copy the entire AUTOSAR
-mapping folder, including `+autosarMapping`, when using address mapping.
+mapping folder, including `+autosarMapping`, when using Code Mappings.
 
 ```matlab
 % Preview signal naming changes in the current system
@@ -86,8 +86,74 @@ a MATLAB license.
 ## AUTOSAR mapping
 
 Requires MATLAB/Simulink R2024a or later, AUTOSAR Blockset, and a loaded AUTOSAR
-Classic component model. Edit [autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv),
-or create a CSV with exactly these columns:
+Classic component model. Export its settings, edit the CSV, then preview/apply:
+
+```matlab
+addpath('tools/autosar_mapping')
+load_system('MotorCtrl')
+rules = exportAutosarMapping('MotorCtrl', 'code_mapping.csv'); % New file only.
+% Edit code_mapping.csv, retaining the rows you want to manage.
+r = configureAutosarMapping('MotorCtrl', 'code_mapping.csv'); % Preview.
+disp(r.Elements)
+r = configureAutosarMapping('MotorCtrl', 'code_mapping.csv', struct('Mode', 'apply'));
+save_system('MotorCtrl') % Explicit save after review.
+```
+
+The property schema is `Model,Category,Element,Property,Value`. Example rules
+are in [autosar_code_mapping.csv](tools/autosar_mapping/autosar_code_mapping.csv):
+
+```csv
+Model,Category,Element,Property,Value
+MotorCtrl,Inports,*,DataAccessMode,ExplicitReceive
+MotorCtrl,Outports,*,DataAccessMode,ExplicitSend
+MotorCtrl,Signals,type:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal
+```
+
+| Category | Settings |
+| --- | --- |
+| `Inports`, `Outports` | Port, DataElement, DataAccessMode: implicit, explicit, queued, E2E, status and mode-switch modes supported by the native API. Bus-element ports use their block names. |
+| `Functions` | Runnable, SwAddrMethod, SwAddrMethodForInternalData on eligible entry points. |
+| `FunctionCallers`, `DataTransfers` | Client Port/Operation; InterRunnableVariable and Implicit/Explicit DataAccessMode. |
+| `ModelParameters`, `ModelParameterArguments` | MappedTo, native calibration attributes, ConstantMemory qualifiers, Port/DataElement for PortParameter arguments. |
+| `Signals`, `States`, `DataStores`, `SynthesizedDataStores` | MappedTo, ShortName, LongName, SwAddrMethod, SwCalibrationAccess, DisplayFormat; IsVolatile/Qualifier for StaticMemory; NeedsNVRAMAccess/RestoreAtStart/StoreAtShutdown for per-instance memory. |
+| `Defaults` | InternalData: Packaging and GroupInternalDataByFunction; InportsOutports: EndToEndProtectionMethod. InternalData/Constants SwAddrMethod defaults are available only on releases exposing those public APIs. |
+
+Use exact exported identifiers, `*` for a category, or `type:StaticMemory` (etc.)
+for its **current** memory type. Signals use `block/path:port`; named states can
+be targeted with `block/path#StateName`. Native state discovery exports block
+owners; add named-state rules explicitly for blocks with multiple named states.
+`Registered=true/false` explicitly adds/removes signal or synthesized-store
+mappings; Registered=false must be the only rule for that element.
+New synthesized stores require a model-workspace Simulink.Signal.
+
+Models use exact names without folders/extensions. Categories ignore case;
+properties and native enum values use their exported spelling. Empty Value
+explicitly clears an attribute; omitting a row leaves it unmanaged. Each resolved
+element/property may have one rule, so overlapping selectors are rejected.
+Unmatched selectors and unknown/unavailable settings are errors. CSV files
+resolve in the current folder, then on the MATLAB path; tables are also accepted.
+Pass `[]` as the model to use the current model.
+
+Coupled properties are applied together regardless of CSV row order. Changing
+MappedTo preserves compatible settings and discards properties unavailable for
+the new role. Defaults apply first; native readback verifies all configured
+settings. Failed operations attempt to restore full readable settings and
+registration; exception causes include rollback failures. The tool never saves
+the model or traverses references. Run each referenced model explicitly.
+
+Preview validates schema, selectors, property applicability, method section types
+and scalar enums. Apply also invokes the native setters, which can reject
+context-dependent combinations. For example, ModeReceive/ModeSend require
+mode-switch ports, and queued/E2E modes need appropriate interface configuration
+and code-generation validation. No compilation, code generation, dictionary
+element creation, or Adaptive-platform configuration is performed. Export lists
+only properties available on the installed release; R2026b default-method APIs
+are unavailable on R2024a. Run `tests/testAutosarCodeMapping.m` for native fixture
+coverage; production-model code generation is a separate validation step.
+
+The original SwAddrMethod-only API remains available with
+[autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv):
 
 ```csv
 Model,Type,SwAddrMethod
@@ -99,32 +165,21 @@ MotorCtrl,ArTypedPerInstanceMemory,VAR
 BatteryCtrl,Runnable,BATTERY_CODE
 ```
 
-Each `(Model, Type)` occurs once. Model names are exact and case-sensitive,
-without folders or `.slx`; types ignore case. All explicit mappings of a type
-in that model use the same method. `StaticMemory` and `ArTypedPerInstanceMemory`
-cover registered signals, states, and Data Store Memory blocks. Parameters
-come from the model workspace; parameter arguments and port parameters are
-outside this version's scope. Auto mappings and types without a rule are listed
-and left unchanged. Referenced models need their own calls and rules.
+Each `(Model, Type)` occurs once; types ignore case. Supported types are
+Runnable, RunnableInternalData, ConstantMemory, SharedParameter, StaticMemory,
+and ArTypedPerInstanceMemory. All explicit mappings of a type use the same
+method in that model. This shorthand leaves Auto mappings and unconfigured types
+unchanged and operates on model workspace parameters, registered signals, states,
+and Data Store Memory blocks. Use the property API above for parameter arguments
+and other settings.
 
 ```matlab
-addpath('tools/autosar_mapping')
-load_system('MotorCtrl')
 r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv');
-disp(r.Elements) % Review Current, Desired, Status, and Reason.
 r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv', struct('Mode', 'apply'));
-save_system('MotorCtrl') % Explicitly save after reviewing the changes.
 ```
 
-Use `[]` for the current model, or pass a rules table instead of a CSV.
-`readAutosarMappingRules` reads and validates the configuration independently.
-CSV files resolve in the current folder, then on the MATLAB path.
 `r.Rules.Matched` exposes rules with no matching elements; `r.Compliant` requires
 every rule to match and every configured element to have the desired method.
-Apply preserves the mapping type, runnable name, calibration settings, and other
-attributes, verifies the result, and attempts rollback on failure. Exceptions
-include any rollback failures; inspect the model before saving after an error.
-The tool never saves the model or updates referenced models.
 
 Methods must already exist in the model with unique SHORT-NAMEs. SectionType
 must be `Code` for Runnable, `Const` for ConstantMemory, `Const` or `Calprm` for
@@ -134,11 +189,8 @@ SharedParameter, and `Var` for variable memory. The optional
 internal-data method and are reported as ignored. Unsupported or ambiguous
 rules stop the operation before any mapping changes.
 
-This version uses existing element mappings supported by R2024a. It does not
-set the model-wide InternalData/Constants defaults introduced in R2026b. The
-native API workflow is described in [MathWorks AUTOSAR data configuration](https://www.mathworks.com/help/autosar/ug/configure-autosar-data-for-measurement-and-calibration.html).
-Run `tests/testAutosarMapping.m` for native fixture coverage and failure recovery
-tests; production-model code generation remains a separate validation step.
+Run `tests/testAutosarMapping.m` for shorthand API regression coverage. The native
+workflow is described in [MathWorks AUTOSAR mapping API](https://www.mathworks.com/help/autosar/ref/autosar.api.getsimulinkmapping.html).
 
 ## Interface tools
 
