@@ -82,6 +82,11 @@
 
 ## Bus element signal naming
 
+### 2.0.1 - 2026-10-26
+
+- Follow Simulink's resolved Goto visibility in CLI and GUI, preventing changes
+  to unrelated signals with the same tag in other subsystems.
+
 ### 2.0.0 - 2026-10-19
 
 - Remove name-prefix and leaf-element naming from CLI and GUI; always derive

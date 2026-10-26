@@ -1,6 +1,6 @@
 function fig = nameBusElementSignalsGui(sys, opts)
 %NAMEBUSELEMENTSIGNALSGUI Preview and apply bus-element signal names.
-% Version: 2.0.0 (Signal naming).
+% Version: 2.0.1 (Signal naming).
 %   nameBusElementSignalsGui
 %   fig = nameBusElementSignalsGui('MyModel/Subsystem')
 %   fig = nameBusElementSignalsGui(gcs, struct('overwrite', true))
@@ -37,7 +37,7 @@ function fig = nameBusElementSignalsGui(sys, opts)
         end
     end
     busy = false;
-    fig = uifigure('Name', 'Bus Element Signal Naming v2.0.0', ...
+    fig = uifigure('Name', 'Bus Element Signal Naming v2.0.1', ...
         'Position', [220 140 840 480], 'CloseRequestFcn', @(~, ~) closeGui());
     fig.UserData = struct('Report', [], 'Mode', '', 'Error', '');
     grid = uigridlayout(fig, [7 1], ...
