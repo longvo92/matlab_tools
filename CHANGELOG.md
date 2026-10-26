@@ -122,6 +122,12 @@
 
 ## Quick simulation setup
 
+### 1.0.1 - 2026-10-26
+
+- Resolve and verify SLDD files outside the MATLAB path, adding their folder to
+  the session path and reporting the resolved dictionary path.
+- Leave the model unlinked and restore the session path when linking fails.
+
 ### 1.0.0 - 2026-10-19
 
 - Establish the first tracked version of the existing setup tool: create a model,

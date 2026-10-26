@@ -23,7 +23,7 @@
 | --- | --- | --- | --- |
 | **Bus element signal naming** | `2.0.1` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
-| **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
+| **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
@@ -53,7 +53,9 @@ Use `help <functionName>` for options and examples. `quickSimEnv` puts MAT data 
 the model workspace, falling back to the base workspace for incompatible objects
 such as bus objects and config sets. M-file scripts run in the base workspace.
 Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
-and link the first available config set.
+and link the first available config set. Linking an external SLDD adds its folder
+to the session's MATLAB path and reports the verified full path in `report.sldd`.
+Failed links leave the model unlinked and restore the previous path.
 
 The forbidden block checker stops if a referenced model cannot be resolved.
 Set `opts.checkReferencedModels=false` to explicitly check only the given model.
