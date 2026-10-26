@@ -1,5 +1,34 @@
 # Tool version history
 
+## AUTOSAR Code Mappings
+
+### 1.2.0 - 2026-10-26
+
+- Share calibration naming regexp across models through a separate JSON config,
+  with include/exclude patterns, case control, role preservation and model CSV
+  overrides. Select matching parameter names with `calibration:*`.
+- Add a simple GUI for model/config selection, CSV export, preview and apply.
+  Use the same backend as CLI and reject changes to model/config inputs after
+  preview. Changes remain in memory until explicitly saved.
+
+### 1.1.0 - 2026-10-26
+
+- Export and configure property rules for every AUTOSAR Classic Code Mappings
+  category exposed by the supported mapping API, including implicit/explicit,
+  queued, E2E, mode-switch, client/server and inter-runnable mappings.
+- Manage memory roles, model parameter arguments, calibration and NVRAM
+  attributes, signal/store registration, internal-data packaging and E2E defaults.
+- Apply coupled settings together, verify configured mappings, and restore full
+  readable settings on failure. Keep the original SwAddrMethod CSV API available.
+
+### 1.0.0 - 2026-10-26
+
+- Manage one SwAddrMethod per AUTOSAR mapping type and model through CSV rules.
+- Preview or apply runnable, runnable internal data, parameter, signal, state,
+  and data-store mappings while preserving their types and other properties.
+- Validate rules and method section types before changes; verify applied values
+  and attempt rollback on failure. Model saving remains explicit.
+
 ## Interface tools
 
 ### 1.10.2 - 2026-10-26

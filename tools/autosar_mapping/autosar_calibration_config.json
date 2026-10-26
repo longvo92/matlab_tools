@@ -1,0 +1,10 @@
+{
+  "Enabled": true,
+  "IncludePatterns": [],
+  "ExcludePatterns": [],
+  "IgnoreCase": false,
+  "PreserveExplicitMappings": true,
+  "ModelParameterMapping": "SharedParameter",
+  "ArgumentMapping": "PerInstanceParameter",
+  "SwCalibrationAccess": "ReadWrite"
+}

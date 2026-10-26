@@ -12,6 +12,7 @@
   <a href="#features">Features</a> &middot;
   <a href="#quick-start">Quick start</a> &middot;
   <a href="#interface-tools">Interface tools</a> &middot;
+  <a href="#autosar-mapping">AUTOSAR mapping</a> &middot;
   <a href="https://github.com/longvo92/matlab_tools/issues">Issues</a> &middot;
   <a href="#versioning">Versions</a> &middot;
   <a href="#license">License</a>
@@ -25,12 +26,14 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
+| **AUTOSAR Code Mappings** | `1.2.0` | CLI/GUI to preview/apply per-model mapping rules, with global calibration regexp, access modes, memory/calibration/NVRAM settings and defaults. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
 Copy the tool you need into a folder on your MATLAB path. No package installation
 or shared repository helpers are needed. Keep adjacent JSON files with their tools;
-copy the entire interface bundle when using its GUI.
+copy the entire interface bundle when using its GUI. Copy the entire AUTOSAR
+mapping folder, including `+autosarMapping`, when using Code Mappings.
 
 ```matlab
 % Preview signal naming changes in the current system
@@ -79,6 +82,175 @@ empty prefix or `useLeafName=false` remain accepted; active legacy values raise
 These are MATLAB/Simulink tools. Python 3.12 is used only by the
 [CI lint workflow](.github/workflows/matlab-lint.yml), which runs MISS_HIT without
 a MATLAB license.
+
+## AUTOSAR mapping
+
+Requires MATLAB/Simulink R2024a or later, AUTOSAR Blockset, and a loaded AUTOSAR
+Classic component model. Open the GUI with:
+
+```matlab
+addpath('tools/autosar_mapping')
+autosarMappingGui
+```
+
+Choose or load a model, optionally select its CSV, edit the global calibration
+JSON, then click **Preview** and **Apply preview**. The table shows current and
+desired values and the matching global pattern. Leave Model CSV empty to use
+global calibration rules alone. **Export CSV** writes a new settings file;
+**Edit** opens an existing config in the MATLAB editor. Changing inputs clears
+the preview. Apply rejects model/CSV/JSON changes made since Preview. Closing
+is deferred during operations. Changes stay in memory; save in Simulink after
+review. The CLI uses the same backend:
+
+```matlab
+addpath('tools/autosar_mapping')
+load_system('MotorCtrl')
+rules = exportAutosarMapping('MotorCtrl', 'code_mapping.csv'); % New file only.
+% Edit code_mapping.csv, retaining the rows you want to manage.
+r = configureAutosarMapping('MotorCtrl', 'code_mapping.csv'); % Preview.
+disp(r.Elements)
+r = configureAutosarMapping('MotorCtrl', 'code_mapping.csv', struct('Mode', 'apply'));
+save_system('MotorCtrl') % Explicit save after review.
+```
+
+Global naming rules live in
+[autosar_calibration_config.json](tools/autosar_mapping/autosar_calibration_config.json),
+shared by every model and both CLI/GUI. The file is read on each run and has no
+model-specific sections. `IncludePatterns` starts empty so no naming convention
+is assumed. For example, adapt these patterns to your project's names:
+
+```json
+{
+  "IncludePatterns": ["^(Cal_|K_)"],
+  "ExcludePatterns": ["_Test$"],
+  "IgnoreCase": false,
+  "PreserveExplicitMappings": true
+}
+```
+
+A model parameter/argument matches any include and no exclude. Patterns use
+MATLAB regexp syntax; double backslashes inside JSON strings. Invalid patterns
+and dynamic MATLAB commands in patterns are rejected. Defaults map matching
+Auto parameters to SharedParameter, Auto arguments to PerInstanceParameter,
+and set SwCalibrationAccess=ReadWrite. `PreserveExplicitMappings` keeps existing
+non-Auto **roles**; calibration access still follows the global config. The file
+also exposes ModelParameterMapping, ArgumentMapping, SwCalibrationAccess and
+Enabled. Explicit model CSV fields take precedence; MappedTo=Auto opts an
+element out of these defaults. Exported CSV rows are explicit too: remove rows
+you want global defaults to manage.
+
+Use `calibration:*` in a parameter category to select the matching names, even
+before their Auto mappings become calibration parameters. For example:
+
+```csv
+Model,Category,Element,Property,Value
+MotorCtrl,ModelParameters,calibration:*,SwAddrMethod,CONST
+```
+
+```matlab
+r = configureAutosarMapping('MotorCtrl'); % Global calibration rules only.
+opts = struct('CalibrationConfig', 'company_calibration.json');
+r = configureAutosarMapping('MotorCtrl', [], opts); % Another shared config.
+```
+
+Set opts.CalibrationConfig='' to disable global rules for a call. Reports expose
+CalibrationMatches and CalibrationConfig. Pass a preview's Snapshot through
+opts.ExpectedSnapshot for guarded CLI apply. The original SwAddrMethod-only
+shorthand below retains its original behavior and does not classify calibration.
+
+The property schema is `Model,Category,Element,Property,Value`. Example rules
+are in [autosar_code_mapping.csv](tools/autosar_mapping/autosar_code_mapping.csv):
+
+```csv
+Model,Category,Element,Property,Value
+MotorCtrl,Inports,*,DataAccessMode,ExplicitReceive
+MotorCtrl,Outports,*,DataAccessMode,ExplicitSend
+MotorCtrl,Signals,type:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal
+```
+
+| Category | Settings |
+| --- | --- |
+| `Inports`, `Outports` | Port, DataElement, DataAccessMode: implicit, explicit, queued, E2E, status and mode-switch modes supported by the native API. Bus-element ports use their block names. |
+| `Functions` | Runnable, SwAddrMethod, SwAddrMethodForInternalData on eligible entry points. |
+| `FunctionCallers`, `DataTransfers` | Client Port/Operation; InterRunnableVariable and Implicit/Explicit DataAccessMode. |
+| `ModelParameters`, `ModelParameterArguments` | MappedTo, native calibration attributes, ConstantMemory qualifiers, Port/DataElement for PortParameter arguments. |
+| `Signals`, `States`, `DataStores`, `SynthesizedDataStores` | MappedTo, ShortName, LongName, SwAddrMethod, SwCalibrationAccess, DisplayFormat; IsVolatile/Qualifier for StaticMemory; NeedsNVRAMAccess/RestoreAtStart/StoreAtShutdown for per-instance memory. |
+| `Defaults` | InternalData: Packaging and GroupInternalDataByFunction; InportsOutports: EndToEndProtectionMethod. InternalData/Constants SwAddrMethod defaults are available only on releases exposing those public APIs. |
+
+Use exact exported identifiers, `*` for a category, or `type:StaticMemory` (etc.)
+for its **current** memory type. Signals use `block/path:port`; named states can
+be targeted with `block/path#StateName`. Native state discovery exports block
+owners; add named-state rules explicitly for blocks with multiple named states.
+`Registered=true/false` explicitly adds/removes signal or synthesized-store
+mappings; Registered=false must be the only rule for that element.
+New synthesized stores require a model-workspace Simulink.Signal.
+
+Models use exact names without folders/extensions. Categories ignore case;
+properties and native enum values use their exported spelling. Empty Value
+explicitly clears an attribute; omitting a row leaves it unmanaged. Each resolved
+element/property may have one rule, so overlapping selectors are rejected.
+Unmatched selectors and unknown/unavailable settings are errors. CSV files
+resolve in the current folder, then on the MATLAB path; tables are also accepted.
+Pass `[]` as the model to use the current model.
+
+Coupled properties are applied together regardless of CSV row order. Changing
+MappedTo preserves compatible settings and discards properties unavailable for
+the new role. Defaults apply first; native readback verifies all configured
+settings. Failed operations attempt to restore full readable settings and
+registration; exception causes include rollback failures. The tool never saves
+the model or traverses references. Run each referenced model explicitly.
+
+Preview validates schema, selectors, property applicability, method section types
+and scalar enums. Apply also invokes the native setters, which can reject
+context-dependent combinations. For example, ModeReceive/ModeSend require
+mode-switch ports, and queued/E2E modes need appropriate interface configuration
+and code-generation validation. No compilation, code generation, dictionary
+element creation, or Adaptive-platform configuration is performed. Export lists
+only properties available on the installed release; R2026b default-method APIs
+are unavailable on R2024a. Run `tests/testAutosarCodeMapping.m` for native fixture
+coverage and `tests/testAutosarCalibrationAndGui.m` for global regexp and GUI
+callbacks. Production-model code generation is a separate validation step.
+
+The original SwAddrMethod-only API remains available with
+[autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv):
+
+```csv
+Model,Type,SwAddrMethod
+MotorCtrl,Runnable,CODE
+MotorCtrl,ConstantMemory,CONST
+MotorCtrl,SharedParameter,CONST
+MotorCtrl,StaticMemory,VAR
+MotorCtrl,ArTypedPerInstanceMemory,VAR
+BatteryCtrl,Runnable,BATTERY_CODE
+```
+
+Each `(Model, Type)` occurs once; types ignore case. Supported types are
+Runnable, RunnableInternalData, ConstantMemory, SharedParameter, StaticMemory,
+and ArTypedPerInstanceMemory. All explicit mappings of a type use the same
+method in that model. This shorthand leaves Auto mappings and unconfigured types
+unchanged and operates on model workspace parameters, registered signals, states,
+and Data Store Memory blocks. Use the property API above for parameter arguments
+and other settings.
+
+```matlab
+r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv');
+r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv', struct('Mode', 'apply'));
+```
+
+`r.Rules.Matched` exposes rules with no matching elements; `r.Compliant` requires
+every rule to match and every configured element to have the desired method.
+
+Methods must already exist in the model with unique SHORT-NAMEs. SectionType
+must be `Code` for Runnable, `Const` for ConstantMemory, `Const` or `Calprm` for
+SharedParameter, and `Var` for variable memory. The optional
+`RunnableInternalData` type requires `GroupInternalDataByFunction='on'` and a
+`Var` method. Initialize, terminate, and reset functions have no configurable
+internal-data method and are reported as ignored. Unsupported or ambiguous
+rules stop the operation before any mapping changes.
+
+Run `tests/testAutosarMapping.m` for shorthand API regression coverage. The native
+workflow is described in [MathWorks AUTOSAR mapping API](https://www.mathworks.com/help/autosar/ref/autosar.api.getsimulinkmapping.html).
 
 ## Interface tools
 
