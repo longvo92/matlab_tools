@@ -2,6 +2,14 @@
 
 ## Interface tools
 
+### 1.10.2 - 2026-10-26
+
+- Generate correct numeric values and preserve multiline descriptions; keep the
+  previous parameter file if generation fails.
+- Detect sheets beyond column AZ and sync exactly the selected sheets.
+- Keep the GUI open during an operation so closing cannot interrupt its controls.
+- Use neutral interface window titles and configurable project defaults.
+
 ### 1.10.1 - 2026-10-20
 
 - Keep Select all changes and Clear changes at the left above the differences

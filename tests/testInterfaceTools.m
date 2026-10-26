@@ -1,6 +1,9 @@
-function testInterfaceTools()
+function testInterfaceTools(scope)
 %TESTINTERFACETOOLS Exercise interface tools using temporary synthetic data.
 % Requires live MATLAB/Simulink R2024a+. No production files are read or edited.
+% testInterfaceTools('review') runs only the review regression cases.
+    if nargin < 1, scope = 'all'; end
+    scope = validatestring(scope, {'all', 'review'});
     repo = fileparts(fileparts(mfilename('fullpath')));
     toolFolder = fullfile(repo, 'tools', 'interface_tools');
     previousPath = path;
@@ -12,6 +15,10 @@ function testInterfaceTools()
     addpath(sandbox, '-begin');
     cd(sandbox);
     mkdir('arch');
+    if strcmp(scope, 'review')
+        local_testReviewedRegressions(sandbox);
+        return;
+    end
     dictionary = fullfile(sandbox, 'arch', 'test.sldd');
     dd = Simulink.dictionary.archdata.create(dictionary);
     dictCleanup = onCleanup(@() local_close(dd));
@@ -234,6 +241,7 @@ function testInterfaceTools()
     local_testStatusRemoval(sandbox);
     local_testComparisonScope(sandbox);
     local_testPropertyUpdates(sandbox);
+    local_testReviewedRegressions(sandbox);
     fprintf('PASS: CLI preview/apply, complete GUI preview, all-sheet parameters, config paths/validation.\n');
     fprintf('Synthetic fixtures and GUI screenshot: %s\n', sandbox);
 end
@@ -709,6 +717,110 @@ function local_testPropertyUpdates(sandbox)
     assert(isequal(before, local_bytes(file)));
     clear cleanup refCleanup;
     fprintf('PASS: property-only CLI/GUI, per-property selection, named/reference types, stale preview, rollback.\n');
+end
+
+function local_testReviewedRegressions(sandbox)
+    source = fullfile(sandbox, 'review-parameters.xlsx');
+    output = fullfile(sandbox, 'reviewParameters.m');
+    description = sprintf('First line: 100%% \\path\nSecond ''quoted'' line');
+    writecell({'Status', 'Parameter', 'Value', 'DataType', 'Element'; ...
+        'Accept', 'reviewParameter', '1,000', 'double', description}, source);
+    generate_simulink_parameters(source, output);
+    clear reviewParameters;
+    run(output);
+    assert(reviewParameter.Value == 1000 && strcmp(reviewParameter.Description, description));
+    writecell({'Status', 'Parameter', 'Value', 'DataType', 'Element'; ...
+        'Accept', 'reviewParameter', '2,000', 'double', description}, source);
+    generate_simulink_parameters(source, output);
+    % Same-size rewrites within one second can retain MATLAB's script cache.
+    assert(contains(fileread(output), 'reviewParameter.Value = 2000;'));
+    clear reviewParameters;
+    run(output);
+    assert(reviewParameter.Value == 2000 && strcmp(reviewParameter.Description, description));
+    original = local_bytes(output);
+    existingFiles = dir(fullfile(sandbox, '*.m'));
+    opts = struct('LogFcn', @local_failParameterRead);
+    local_expectError(@() generate_simulink_parameters(source, output, 'all', opts), ...
+        'InterfaceTools:TestFailure');
+    assert(isequal(original, local_bytes(output)), 'Failed generation overwrote the old output.');
+    afterFiles = dir(fullfile(sandbox, '*.m'));
+    assert(isequal({existingFiles.name}, {afterFiles.name}), 'Temporary parameter file leaked.');
+
+    dictionary = fullfile(sandbox, 'reviewScope.sldd');
+    dd = Simulink.dictionary.archdata.create(dictionary);
+    save(dd);
+    close(dd);
+    workbook = fullfile(sandbox, 'review-scope.xlsx');
+    header = {'Bus', 'Element', 'DataType', 'Status', 'Parameter', 'Value'};
+    writecell([header; {'VisibleBus', 'V', 'double', 'Accept', 'reviewParameter', '1,000'}], ...
+        workbook, 'Sheet', 'Visible');
+    writecell([header; {'HiddenBus', 'H', 'double', '', '', ''}], ...
+        workbook, 'Sheet', 'Wide', 'Range', 'BA1');
+    config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
+        '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
+    config.SourceXlsx = workbook;
+    config.ProjectRoot = sandbox;
+    config.SlddFile = dictionary;
+    config.ParametersFile = fullfile(sandbox, 'reviewGuiParameters.m');
+    configFile = fullfile(sandbox, 'review-config.json');
+    local_write(configFile, jsonencode(config));
+    fig = interface_tools_gui(struct('ConfigFile', configFile));
+    figCleanup = onCleanup(@() delete(fig));
+    sheets = findall(fig, 'Tag', 'SyncSheets');
+    assert(strcmp(fig.Name, 'Interface Tools'));
+    assert(isequal(sort(string(sheets.Items)), ["Visible", "Wide"]));
+    sheets.Value = {'Visible'};
+    sheets.ValueChangedFcn(sheets, []);
+    button = findall(fig, 'Tag', 'PreviewSldd');
+    button.ButtonPushedFcn(button, []);
+    details = findall(fig, 'Tag', 'InterfaceDifferences');
+    assert(isequal(details.Data(:, 3), {'VisibleBus.V'}));
+    button = findall(fig, 'Tag', 'SelectChanges');
+    button.ButtonPushedFcn(button, []);
+    button = findall(fig, 'Tag', 'SyncSldd');
+    closeTimer = timer('ExecutionMode', 'fixedSpacing', 'Period', 0.01, ...
+        'TimerFcn', @(clock, ~) local_attemptBusyClose(clock, fig, button));
+    timerCleanup = onCleanup(@() delete(closeTimer));
+    start(closeTimer);
+    button.ButtonPushedFcn(button, []);
+    assert(isvalid(fig) && getappdata(fig, 'ReviewCloseAttempted'));
+    assert(isempty(details.Data) && strcmp(button.Enable, 'off'));
+    clear timerCleanup;
+    dd = Simulink.dictionary.archdata.open(dictionary);
+    assert(isequal(getInterfaceNames(dd), {'VisibleBus'}));
+    close(dd);
+    button = findall(fig, 'Tag', 'GenerateParameters');
+    button.ButtonPushedFcn(button, []);
+    run(config.ParametersFile);
+    assert(reviewParameter.Value == 1000);
+    sourceField = findall(fig, 'Tag', 'SourceXlsx');
+    setappdata(fig, 'ReviewCloseAttempted', false);
+    closeTimer = timer('ExecutionMode', 'fixedSpacing', 'Period', 0.01, ...
+        'TimerFcn', @(clock, ~) local_attemptBusyClose(clock, fig, sourceField));
+    timerCleanup = onCleanup(@() delete(closeTimer));
+    start(closeTimer);
+    sourceField.ValueChangedFcn(sourceField, []);
+    assert(isvalid(fig) && getappdata(fig, 'ReviewCloseAttempted'));
+    clear timerCleanup;
+    close(fig);
+    assert(~isvalid(fig), 'Idle GUI must close normally.');
+    clear figCleanup;
+    fprintf('PASS: numeric/description generation, output preservation, wide sheets, GUI scope/busy close.\n');
+end
+
+function local_failParameterRead(message)
+    if contains(message, '[READ PARAMETERS]')
+        error('InterfaceTools:TestFailure', 'Simulated parameter read failure.');
+    end
+end
+
+function local_attemptBusyClose(clock, fig, button)
+    % A timer may fire before callback entry; close only after work has begun.
+    if isvalid(fig) && strcmp(button.Enable, 'off')
+        setappdata(fig, 'ReviewCloseAttempted', true);
+        close(fig);
+        stop(clock);
+    end
 end
 
 function local_failAfterProperty(message, element)
