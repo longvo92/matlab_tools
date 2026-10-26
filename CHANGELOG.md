@@ -111,6 +111,14 @@
 
 ## Bus element signal naming
 
+### 2.0.2 - 2026-10-26
+
+- Skip Function Element Call / Function Element blocks without data ports in
+  CLI and GUI; continue naming Function Caller data outputs without changing
+  function prototypes or function element definitions.
+- Stop Out Bus Element tracing at Signal Conversion/Signal Copy and Signal
+  Specification outputs, and preserve first In Bus Element propagation settings.
+
 ### 2.0.1 - 2026-10-26
 
 - Follow Simulink's resolved Goto visibility in CLI and GUI, preventing changes

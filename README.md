@@ -22,7 +22,7 @@
 
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
-| **Bus element signal naming** | `2.0.1` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
+| **Bus element signal naming** | `2.0.2` | CLI and GUI to name In/Out Bus Element signals, stop tracing at Signal Copy/Conversion or Specification, and show propagated Out Bus labels. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
@@ -67,13 +67,21 @@ The signal naming GUI defaults to the current model/subsystem. It provides
 subsystem scope, overwrite, and propagated-name options. Names use the complete
 Element path, with dots replaced by underscores. Goto tracing follows Simulink's
 local, scoped, and global tag resolution. **Preview** reports proposed
-changes; **Apply** edits the model in memory without saving it. Propagated labels
-are enabled on supported source output ports; unsupported blocks report `n/a`.
-In Bus Element selection labels require R2024b or later
-([MathWorks](https://www.mathworks.com/help/simulink/ug/signal-label-propagation.html)). The CLI remains
-usable from its single M-file. If propagated labels remain `<>` after Apply,
+changes; **Apply** edits the model in memory without saving it. Out Bus Element
+tracing crosses From/Goto and subsystems, but stops at Signal Conversion
+(including Signal Copy), Signal Specification, or other source blocks and names
+their output line. The first line leaving an In Bus Element gets its explicit
+name without enabling Show propagated; existing propagation settings are preserved,
+including when reached from an Out Bus Element. Propagated Out Bus labels are
+enabled on supported source output ports; unsupported blocks report `n/a`.
+The CLI remains usable from its single M-file. If propagated labels remain `<>` after Apply,
 use Update Diagram (`Ctrl+D`) to resolve them; the tool does not compile models
 automatically.
+
+Function Element Call and Function Element blocks share the bus-element marker
+but have no data signal ports. They are reported as skipped; other data signals,
+including Function Caller outputs, continue to be named. Function prototypes
+and function element definitions remain unchanged.
 
 Since `2.0.0`, prefix and leaf-name options are removed. Existing calls with an
 empty prefix or `useLeafName=false` remain accepted; active legacy values raise
