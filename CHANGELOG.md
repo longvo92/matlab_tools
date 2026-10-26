@@ -110,6 +110,11 @@
 
 ## Forbidden block checker
 
+### 1.0.1 - 2026-10-26
+
+- Stop incomplete referenced-model checks instead of returning a passing result.
+- Report single violations consistently with multiple-violation reports.
+
 ### 1.0.0 - 2026-10-19
 
 - Establish the first tracked version of the existing JSON-configured checker:

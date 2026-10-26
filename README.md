@@ -22,7 +22,7 @@
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
 | **Bus element signal naming** | `2.0.1` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
-| **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
+| **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
@@ -54,6 +54,9 @@ the model workspace, falling back to the base workspace for incompatible objects
 such as bus objects and config sets. M-file scripts run in the base workspace.
 Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
 and link the first available config set.
+
+The forbidden block checker stops if a referenced model cannot be resolved.
+Set `opts.checkReferencedModels=false` to explicitly check only the given model.
 
 The signal naming GUI defaults to the current model/subsystem. It provides
 subsystem scope, overwrite, and propagated-name options. Names use the complete
