@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.5.0 (Interface tools bundle).
+% Version: 1.10.1 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -9,11 +9,16 @@ function fig = interface_tools_gui(opts)
 % ProjectRoot (or absolute). Empty ProjectRoot enables project discovery.
 % Sheets affect SLDD only; parameter generation always processes ALL sheets.
 % Preview lists every ADD/REMOVE/PROPERTY_DIFF as bus.element in a table.
-% Existing property differences are reported only, never applied.
+% Tick individual element/property changes, then Apply selected. Preview is required.
+% Referenced interfaces cannot be selected.
+% Only buses named in selected Excel sheets are compared.
+% REMOVE requires Status=remove in Excel; elements absent from Excel are kept.
 %
 % Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
-% SLDD operations additionally require the project's sldd2excel_main exporter
-% on the MATLAB path or beside ExportXlsx. No other repository helpers needed.
+% SLDD operations read Data Interfaces directly from Architectural Data.
+% No exporter or intermediate workbook is needed.
+% Activity log streams backend progress and retains all session messages.
+% New messages appear first. Disable Follow latest to pause the view.
 
     if nargin < 1, opts = struct(); end
     validateattributes(opts, {'struct'}, {'scalar'});
@@ -26,14 +31,20 @@ function fig = interface_tools_gui(opts)
     projectRoot = '';
     slddFile = '';
     parametersFile = '';
-    exportedFile = '';
     knownSheets = strings(1, 0);
+    previewReport = [];
     logLines = {'Ready. Choose an Excel workbook.'};
+    logClock = tic;
+    screen = get(groot, 'ScreenSize');
+    windowSize = [min(1180, screen(3)-80), min(920, screen(4)-100)];
 
     fig = uifigure('Name', 'CVC Interface Tools', ...
-        'Position', [180 80 980 760], 'Color', [0.97 0.98 0.99]);
-    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 224, 20, '1x', 90}, ...
-        'Padding', [16 12 16 12], 'RowSpacing', 8);
+        'Position', [40 40 windowSize], 'Color', [0.97 0.98 0.99], ...
+        'AutoResizeChildren', 'off');
+    layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 32, 220, 180}, ...
+        'Padding', [16 12 16 12], 'RowSpacing', 8, 'Scrollable', 'on');
+    fig.SizeChangedFcn = @(~, ~) resizeLayout();
+    resizeLayout();
     uilabel(layout, 'Text', 'CVC Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
     sourceGrid = uigridlayout(layout, [2 3], 'RowHeight', {30, 22}, ...
         'ColumnWidth', {90, '1x', 90}, 'Padding', [0 0 0 0]);
@@ -48,7 +59,7 @@ function fig = interface_tools_gui(opts)
         'Interpreter', 'none');
     projectLabel.Layout.Column = [2 3];
 
-    sections = uigridlayout(layout, [1 2], 'ColumnWidth', {'1x', '1.4x'}, ...
+    sections = uigridlayout(layout, [1 2], 'ColumnWidth', {'1x', '2x'}, ...
         'Padding', [0 0 0 0], 'ColumnSpacing', 12);
     parameterPanel = uipanel(sections, 'Title', 'Parameter M-file', 'FontWeight', 'bold');
     pg = uigridlayout(parameterPanel, [5 1], ...
@@ -62,8 +73,8 @@ function fig = interface_tools_gui(opts)
         'ButtonPushedFcn', @(~, ~) runTasks('parameters'));
 
     slddPanel = uipanel(sections, 'Title', 'SLDD interfaces', 'FontWeight', 'bold');
-    sg = uigridlayout(slddPanel, [4 2], ...
-        'RowHeight', {36, 22, '1x', 32}, 'ColumnWidth', {'1x', '1x'}, ...
+    sg = uigridlayout(slddPanel, [5 2], ...
+        'RowHeight', {36, 22, '1x', 28, 32}, 'ColumnWidth', {'1x', '1x'}, ...
         'Padding', [12 8 12 8], 'RowSpacing', 4);
     slddLabel = uilabel(sg, 'Text', config.SlddFile, ...
         'WordWrap', 'on', 'Interpreter', 'none');
@@ -72,26 +83,53 @@ function fig = interface_tools_gui(opts)
     sheetCountLabel.Layout.Column = [1 2];
     sheetList = uilistbox(sg, 'Tag', 'SyncSheets', ...
         'Items', {}, 'Value', {}, 'Multiselect', 'on', ...
-        'ValueChangedFcn', @(~, ~) updateSelectionCount());
-    selectionGrid = uigridlayout(sg, [2 1], 'RowHeight', {28, 28}, 'Padding', [0 0 0 0]);
+        'ValueChangedFcn', @(~, ~) updateSelectionCount(), ...
+        'Tooltip', 'Use Ctrl or Shift to select multiple models.');
+    sheetList.Layout.Column = [1 2];
+    selectionGrid = uigridlayout(sg, [1 2], 'RowHeight', {28}, 'Padding', [0 0 0 0]);
+    selectionGrid.Layout.Column = [1 2];
     selectButton = uibutton(selectionGrid, 'Text', 'Select all', ...
         'ButtonPushedFcn', @(~, ~) selectAllSheets());
     clearButton = uibutton(selectionGrid, 'Text', 'Clear selection', ...
         'ButtonPushedFcn', @(~, ~) clearSheets());
     previewButton = uibutton(sg, 'push', 'Text', 'Preview differences', 'Tag', 'PreviewSldd', ...
         'ButtonPushedFcn', @(~, ~) runTasks('preview'));
-    syncButton = uibutton(sg, 'push', 'Text', 'Sync SLDD (Add / Remove)', 'Tag', 'SyncSldd', ...
+    syncButton = uibutton(sg, 'push', 'Text', 'Apply selected (0)', 'Tag', 'SyncSldd', 'Enable', 'off', ...
         'ButtonPushedFcn', @(~, ~) runTasks('sync'));
     actionButtons = [previewButton, syncButton, parameterButton];
     inputControls = [excelEdit, browseButton, sheetList, selectButton, clearButton];
 
-    detailLabel = uilabel(layout, 'Text', 'SLDD differences: run Preview to compare.', ...
+    detailHeader = uigridlayout(layout, [1 3], ...
+        'ColumnWidth', {145, 120, '1x'}, 'RowHeight', {32}, ...
+        'Padding', [0 0 0 0], 'ColumnSpacing', 8);
+    detailLabel = uilabel(detailHeader, 'Text', 'Run Preview, then tick changes to apply.', ...
         'FontWeight', 'bold');
+    detailLabel.Layout.Row = 1;
+    detailLabel.Layout.Column = 3;
+    selectChangesButton = uibutton(detailHeader, 'Text', 'Select all changes', 'Tag', 'SelectChanges', ...
+        'ButtonPushedFcn', @(~, ~) selectChanges(true));
+    selectChangesButton.Layout.Row = 1;
+    selectChangesButton.Layout.Column = 1;
+    clearChangesButton = uibutton(detailHeader, 'Text', 'Clear changes', 'Tag', 'ClearChanges', ...
+        'ButtonPushedFcn', @(~, ~) selectChanges(false));
+    clearChangesButton.Layout.Row = 1;
+    clearChangesButton.Layout.Column = 2;
     detailTable = uitable(layout, 'Tag', 'InterfaceDifferences', ...
-        'Data', cell(0, 5), 'ColumnName', {'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
-        'ColumnWidth', {130, 220, 100, 'auto', 'auto'}, 'RowName', {}, ...
-        'ColumnEditable', false);
-    logArea = uitextarea(layout, 'Editable', 'off', 'Value', logLines);
+        'Data', cell(0, 6), 'ColumnName', {'Apply', 'Action', 'Bus.Element', 'Property', 'XLSX', 'SLDD'}, ...
+        'ColumnFormat', {'logical', 'char', 'char', 'char', 'char', 'char'}, ...
+        'ColumnWidth', {50, 110, 190, 90, 330, 330}, 'RowName', {}, ...
+        'ColumnEditable', [true false false false false false], ...
+        'CellEditCallback', @(~, event) editChange(event));
+    inputControls = [inputControls, selectChangesButton, clearChangesButton, detailTable];
+    logPanel = uipanel(layout, 'Title', 'Activity log', 'FontWeight', 'bold');
+    logGrid = uigridlayout(logPanel, [2 1], 'RowHeight', {22, '1x'}, ...
+        'Padding', [8 6 8 6], 'RowSpacing', 4);
+    logHeader = uigridlayout(logGrid, [1 2], 'ColumnWidth', {'1x', 190}, 'Padding', [0 0 0 0]);
+    logState = uilabel(logHeader, 'Text', 'Ready', 'Tag', 'ActivityStatus');
+    followLog = uicheckbox(logHeader, 'Text', 'Follow latest (newest first)', 'Value', true, 'Tag', 'FollowLog', ...
+        'ValueChangedFcn', @(~, ~) flushLog());
+    logArea = uitextarea(logGrid, 'Editable', 'off', 'Value', logLines, ...
+        'Tag', 'ActivityLog', 'FontName', 'Consolas', 'WordWrap', 'on');
     if ~isempty(config.SourceXlsx)
         excelEdit.Value = config.SourceXlsx;
         loadExcel();
@@ -100,6 +138,12 @@ function fig = interface_tools_gui(opts)
     % ------------------------------------------------------------
     % Select source XLSX / discover project
     % ------------------------------------------------------------
+    function resizeLayout()
+        % Keep the table usable on short displays; overflow scrolls as a whole.
+        fixedHeight = 28 + 72 + 320 + 32 + 180 + 24 + 5*8;
+        layout.RowHeight{5} = max(220, fig.Position(4) - fixedHeight);
+    end
+
     function browseExcel()
         [filename, folder] = uigetfile( ...
             {'*.xlsx;*.xlsm', 'Excel workbooks (*.xlsx, *.xlsm)'}, ...
@@ -114,14 +158,13 @@ function fig = interface_tools_gui(opts)
         projectRoot = '';
         slddFile = '';
         parametersFile = '';
-        exportedFile = '';
         knownSheets = strings(1, 0);
         sheetList.Items = {};
         sheetList.Value = {};
         projectLabel.Text = 'Automatic project discovery';
         slddLabel.Text = config.SlddFile;
         parametersLabel.Text = config.ParametersFile;
-        detailTable.Data = cell(0, 5);
+        resetPreview();
         detailLabel.Text = 'SLDD differences: run Preview to compare.';
         sheetCountLabel.Text = 'No sheets loaded';
         if isempty(source), return; end
@@ -130,7 +173,7 @@ function fig = interface_tools_gui(opts)
             return;
         end
 
-        % Normalize relative XLSX paths before Sync temporarily changes pwd.
+        % Normalize relative XLSX paths before calling the backends.
         [resolved, info] = fileattrib(source);
         if resolved
             source = info.Name;
@@ -147,7 +190,6 @@ function fig = interface_tools_gui(opts)
                 end
             end
             parametersFile = local_resolvePath(config.ParametersFile, projectRoot);
-            exportedFile = local_resolvePath(config.ExportXlsx, projectRoot);
             slddFile = findProjectSldd(projectRoot, config.SlddFile);
 
             projectLabel.Text = projectRoot;
@@ -163,6 +205,8 @@ function fig = interface_tools_gui(opts)
             slddLabel.Tooltip = local_resolvePath(config.SlddFile, projectRoot);
             parametersLabel.Text = parametersFile;
             parametersLabel.Tooltip = parametersFile;
+            appendLog('Source XLSX: ' + string(source));
+            appendLog('SLDD: ' + string(slddFile));
             appendLog('Project: ' + string(projectRoot));
 
             sheets = string(sheetnames(source));
@@ -218,7 +262,7 @@ function fig = interface_tools_gui(opts)
     function updateSelectionCount()
         sheetCountLabel.Text = sprintf('%d / %d model(s) selected for SLDD sync', ...
             numel(sheetList.Value), numel(knownSheets));
-        detailTable.Data = cell(0, 5);
+        resetPreview();
         detailLabel.Text = 'SLDD differences: selection changed. Run Preview to compare.';
     end
 
@@ -252,22 +296,6 @@ function fig = interface_tools_gui(opts)
                     'SLDD not found');
                 return;
             end
-            if ~isfolder(fileparts(exportedFile))
-                uialert(fig, sprintf('SLDD exporter folder does not exist:\n%s', ...
-                    fileparts(exportedFile)), 'Missing exporter folder');
-                return;
-            end
-            if exist('sldd2excel_main', 'file') ~= 2
-                commonFolder = fileparts(exportedFile);
-                if isfile(fullfile(commonFolder, 'sldd2excel_main.m'))
-                    addpath(commonFolder);
-                end
-            end
-            if exist('sldd2excel_main', 'file') ~= 2
-                uialert(fig, 'sldd2excel_main.m must be on the MATLAB path.', ...
-                    'Exporter not found');
-                return;
-            end
         end
         if doParams && ~isfolder(fileparts(parametersFile))
             uialert(fig, sprintf('Parameter output folder does not exist:\n%s', fileparts(parametersFile)), ...
@@ -275,14 +303,20 @@ function fig = interface_tools_gui(opts)
             return;
         end
         if doApply
-            choice = uiconfirm(fig, sprintf([ ...
-                'Sync can ADD/REMOVE Architectural Data elements.\n\n' ...
-                'SLDD: %s\nModels: %s\n\nContinue?'], ...
-                slddFile, strjoin(selected, ', ')), ...
-                'Confirm SLDD sync', 'Icon', 'warning', ...
-                'Options', {'Sync', 'Cancel'}, ...
-                'DefaultOption', 2, 'CancelOption', 2);
-            if ~strcmp(choice, 'Sync'), return; end
+            if isempty(previewReport)
+                appendLog('Run Preview and tick element/property changes before applying.');
+                return;
+            end
+            chosen = cell2mat(detailTable.Data(:, 1));
+            chosen = chosen & previewReport.Selectable;
+            if ~any(chosen)
+                appendLog('No editable changes selected.');
+                return;
+            end
+            applyOptions = struct('Mode', 'apply', ...
+                'SelectedChanges', previewReport.Changes(chosen, :), ...
+                'ExpectedSnapshot', {previewReport.Snapshot}, ...
+                'LogFcn', @(message) appendLog(message, false));
         end
         if doParams && isfile(parametersFile)
             choice = uiconfirm(fig, ...
@@ -297,39 +331,46 @@ function fig = interface_tools_gui(opts)
         restoreButtons = onCleanup(@() enableActions('on'));
         try
             if doSync
-                detailTable.Data = cell(0, 5);
-                detailLabel.Text = 'SLDD differences: comparing...';
-                if strcmp(task, 'preview')
-                    mode = 'preview';
-                else
-                    mode = 'apply';
+                appendLog(sprintf('%s: %d model(s): %s', upper(task), numel(selected), strjoin(selected, ', ')));
+                requested = selected;
+                if numel(selected) == numel(knownSheets), requested = 'all'; end
+                if doApply
+                    appendLog(sprintf('Applying %d selected changes ...', sum(chosen)));
+                    summary = sync_bus_interfaces_from_excel(source, slddFile, requested, applyOptions);
+                    appendLog(sprintf('Applied: ADD=%d REMOVE=%d UPDATE=%d SAVED=%d', ...
+                        summary.Added, summary.Removed, summary.Updated, summary.Saved));
                 end
-                appendLog(sprintf('SLDD %s: %d model(s)', mode, numel(selected)));
+                resetPreview();
+                detailLabel.Text = 'Comparing Excel buses with SLDD ...';
                 drawnow;
-                % Exporter can rely on relative project paths: run from root.
-                currentFolder = pwd;
-                restoreFolder = onCleanup(@() cd(currentFolder));
-                cd(projectRoot);
-                summary = sync_bus_interfaces_from_excel( ...
-                    source, slddFile, selected, exportedFile, mode);
-                clear restoreFolder; % Restore cwd before updating the GUI.
-                detailTable.Data = table2cell(summary.Changes);
-                detailLabel.Text = sprintf('SLDD differences: %d ADD, %d REMOVE, %d PROPERTY_DIFF (report only)', ...
-                    summary.ToAdd, summary.ToRemove, summary.MetadataMismatch);
-                appendLog(sprintf('SLDD: ADD=%d REMOVE=%d PROPERTY_DIFF=%d SAVED=%d', ...
-                    summary.ToAdd, summary.ToRemove, ...
-                    summary.MetadataMismatch, summary.Saved));
+                previewOptions = struct('Mode', 'preview', 'LogFcn', @(message) appendLog(message, false));
+                previewReport = sync_bus_interfaces_from_excel(source, slddFile, requested, previewOptions);
+                detailTable.Data = [num2cell(false(height(previewReport.Changes), 1)), ...
+                    table2cell(previewReport.Changes)];
+                detailLabel.Text = sprintf('%d ADD, %d REMOVE, %d PROPERTY_DIFF', ...
+                    previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch);
+                updateApplyState();
+                appendLog(sprintf('Preview: %d ADD, %d REMOVE, %d PROPERTY_DIFF; %d editable changes.', ...
+                    previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch, ...
+                    sum(previewReport.Selectable)));
+                appendLog('REMOVE requires Status=remove in Excel; missing elements are kept.');
+                appendLog(sprintf('%d matching Data Interfaces; tick local element/property changes to apply.', ...
+                    height(previewReport.Interfaces)));
             end
             if doParams
                 appendLog('Generating ALL parameter sheets ...');
                 drawnow;
-                % Deliberately EXACTLY two arguments: original generator.
-                generate_simulink_parameters(source, parametersFile);
+                parameterOptions = struct('LogFcn', @(message) appendLog(message, false));
+                generate_simulink_parameters(source, parametersFile, 'all', parameterOptions);
                 appendLog('Generated: ' + string(parametersFile));
             end
             appendLog('Finished successfully.');
         catch ME
-            if doSync, detailLabel.Text = 'SLDD comparison failed. See activity log.'; end
+            if doSync
+                resetPreview();
+                detailLabel.Text = 'Run Preview again. See activity log.';
+            end
+            appendLog(getReport(ME, 'extended', 'hyperlinks', 'off'));
             appendLog('ERROR: ' + string(ME.message));
             fprintf(2, '\n%s\n', getReport(ME, 'extended', 'hyperlinks', 'off'));
             uialert(fig, ME.message, 'Tool failed', 'Icon', 'error');
@@ -342,16 +383,66 @@ function fig = interface_tools_gui(opts)
         for k = 1:numel(controls)
             controls(k).Enable = state;
         end
+        if strcmp(state, 'on'), updateApplyState(); end
     end
 
-    function appendLog(message)
-        logLines{end+1, 1} = sprintf('[%s] %s', ...
-            char(datetime('now', 'Format', 'HH:mm:ss')), char(string(message)));
-        if numel(logLines) > 60, logLines = logLines(end-59:end); end
-        logArea.Value = logLines;
-        drawnow limitrate;
-        fprintf('[GUI] %s\n', char(string(message)));
+    function resetPreview()
+        previewReport = [];
+        detailTable.Data = cell(0, 6);
+        syncButton.Enable = 'off';
+        syncButton.Text = 'Apply selected (0)';
     end
+
+    function editChange(event)
+        if isempty(previewReport), return; end
+        row = event.Indices(1);
+        if event.Indices(2) ~= 1, return; end
+        detailTable.Data{row, 1} = logical(event.NewData) && previewReport.Selectable(row);
+        updateApplyState();
+    end
+
+    function selectChanges(selected)
+        if isempty(previewReport), return; end
+        detailTable.Data(:, 1) = num2cell(previewReport.Selectable & selected);
+        updateApplyState();
+    end
+
+    function updateApplyState()
+        count = 0;
+        if ~isempty(previewReport)
+            chosen = cell2mat(detailTable.Data(:, 1));
+            count = sum(chosen & previewReport.Selectable);
+        end
+        syncButton.Text = sprintf('Apply selected (%d)', count);
+        syncButton.Enable = 'off';
+        if count > 0, syncButton.Enable = 'on'; end
+    end
+
+    function appendLog(message, echo)
+        if ~isvalid(fig), return; end
+        if nargin < 2, echo = true; end
+        message = char(string(message));
+        lines = regexp(strtrim(message), '\r\n|\n|\r', 'split');
+        stamp = char(datetime('now', 'Format', 'HH:mm:ss'));
+        entries = cell(numel(lines), 1);
+        for k = 1:numel(lines)
+            entries{k} = sprintf('[%s] %s', stamp, lines{k});
+        end
+        logLines{end+1, 1} = strjoin(entries, newline);
+        logState.Text = lines{end};
+        logState.Tooltip = message;
+        if echo || toc(logClock) >= 0.1, flushLog(); end
+        if echo, fprintf('[GUI] %s\n', message); end
+    end
+
+    function flushLog()
+        if ~isvalid(fig) || ~followLog.Value, return; end
+        logArea.Value = flipud(logLines);
+        drawnow;
+        scroll(logArea, 'top');
+        logClock = tic;
+    end
+
 end
 
 function projectRoot = findProjectRoot(xlsxFile, guiFolder, config)
@@ -410,9 +501,10 @@ function config = local_readConfig(configFile)
     configFolder = fileparts(info.Name);
     config = jsondecode(fileread(configFile));
     names = {'SourceXlsx', 'ProjectRoot', 'ProjectFolderName', 'ArchitectureFolder', ...
-        'SlddFile', 'ParametersFile', 'ExportXlsx'};
+        'SlddFile', 'ParametersFile'};
+    allowed = [names, {'ExportXlsx'}]; % Accept legacy configs; export path is unused.
     if ~isstruct(config) || ~isscalar(config) || ...
-            ~all(isfield(config, names)) || ~all(ismember(fieldnames(config), names))
+            ~all(isfield(config, names)) || ~all(ismember(fieldnames(config), allowed))
         error('InterfaceTools:Config', 'Config must contain exactly: %s.', strjoin(names, ', '));
     end
     for k = 1:numel(names)
