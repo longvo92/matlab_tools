@@ -1,5 +1,5 @@
 function rules = readAutosarCodeMappingRules(source)
-%READAUTOSARCODEMAPPINGRULES Read property-based Code Mappings CSV (v1.1.0).
+%READAUTOSARCODEMAPPINGRULES Read property-based Code Mappings CSV (v1.2.0).
 %   Columns: Model, Category, Element, Property, Value. Element is an exact
 %   exported identifier, '*' for the category, or 'type:StaticMemory' (etc.)
 %   for existing data mapping types. Empty Value explicitly clears a value.

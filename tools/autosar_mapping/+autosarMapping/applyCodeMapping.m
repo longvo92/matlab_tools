@@ -1,5 +1,5 @@
 function applyCodeMapping(adapter, tasks)
-%APPLYCODEMAPPING Apply grouped native mappings with recovery (v1.1.0).
+%APPLYCODEMAPPING Apply grouped native mappings with recovery (v1.2.0).
     dirty = get_param(char(adapter.Model), 'Dirty');
     attempted = [];
     try

@@ -2,6 +2,15 @@
 
 ## AUTOSAR Code Mappings
 
+### 1.2.0 - 2026-10-26
+
+- Share calibration naming regexp across models through a separate JSON config,
+  with include/exclude patterns, case control, role preservation and model CSV
+  overrides. Select matching parameter names with `calibration:*`.
+- Add a simple GUI for model/config selection, CSV export, preview and apply.
+  Use the same backend as CLI and reject changes to model/config inputs after
+  preview. Changes remain in memory until explicitly saved.
+
 ### 1.1.0 - 2026-10-26
 
 - Export and configure property rules for every AUTOSAR Classic Code Mappings

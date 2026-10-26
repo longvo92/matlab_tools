@@ -1,5 +1,5 @@
 function rules = exportAutosarMapping(model, filename)
-%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.1.0).
+%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.2.0).
 %   RULES = exportAutosarMapping(MODEL) returns property rules for the loaded
 %   AUTOSAR Classic model. [] uses the current model. No model changes occur.
 %   exportAutosarMapping(MODEL, CSVFILE) writes a new UTF-8 CSV. Existing files

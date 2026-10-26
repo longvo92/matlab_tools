@@ -26,7 +26,7 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
-| **AUTOSAR Code Mappings** | `1.1.0` | Export, preview and apply per-model CSV rules for access modes, port/function mappings, memory roles, calibration/NVRAM attributes and defaults. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
+| **AUTOSAR Code Mappings** | `1.2.0` | CLI/GUI to preview/apply per-model mapping rules, with global calibration regexp, access modes, memory/calibration/NVRAM settings and defaults. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
@@ -86,7 +86,21 @@ a MATLAB license.
 ## AUTOSAR mapping
 
 Requires MATLAB/Simulink R2024a or later, AUTOSAR Blockset, and a loaded AUTOSAR
-Classic component model. Export its settings, edit the CSV, then preview/apply:
+Classic component model. Open the GUI with:
+
+```matlab
+addpath('tools/autosar_mapping')
+autosarMappingGui
+```
+
+Choose or load a model, optionally select its CSV, edit the global calibration
+JSON, then click **Preview** and **Apply preview**. The table shows current and
+desired values and the matching global pattern. Leave Model CSV empty to use
+global calibration rules alone. **Export CSV** writes a new settings file;
+**Edit** opens an existing config in the MATLAB editor. Changing inputs clears
+the preview. Apply rejects model/CSV/JSON changes made since Preview. Closing
+is deferred during operations. Changes stay in memory; save in Simulink after
+review. The CLI uses the same backend:
 
 ```matlab
 addpath('tools/autosar_mapping')
@@ -98,6 +112,51 @@ disp(r.Elements)
 r = configureAutosarMapping('MotorCtrl', 'code_mapping.csv', struct('Mode', 'apply'));
 save_system('MotorCtrl') % Explicit save after review.
 ```
+
+Global naming rules live in
+[autosar_calibration_config.json](tools/autosar_mapping/autosar_calibration_config.json),
+shared by every model and both CLI/GUI. The file is read on each run and has no
+model-specific sections. `IncludePatterns` starts empty so no naming convention
+is assumed. For example, adapt these patterns to your project's names:
+
+```json
+{
+  "IncludePatterns": ["^(Cal_|K_)"],
+  "ExcludePatterns": ["_Test$"],
+  "IgnoreCase": false,
+  "PreserveExplicitMappings": true
+}
+```
+
+A model parameter/argument matches any include and no exclude. Patterns use
+MATLAB regexp syntax; double backslashes inside JSON strings. Invalid patterns
+and dynamic MATLAB commands in patterns are rejected. Defaults map matching
+Auto parameters to SharedParameter, Auto arguments to PerInstanceParameter,
+and set SwCalibrationAccess=ReadWrite. `PreserveExplicitMappings` keeps existing
+non-Auto **roles**; calibration access still follows the global config. The file
+also exposes ModelParameterMapping, ArgumentMapping, SwCalibrationAccess and
+Enabled. Explicit model CSV fields take precedence; MappedTo=Auto opts an
+element out of these defaults. Exported CSV rows are explicit too: remove rows
+you want global defaults to manage.
+
+Use `calibration:*` in a parameter category to select the matching names, even
+before their Auto mappings become calibration parameters. For example:
+
+```csv
+Model,Category,Element,Property,Value
+MotorCtrl,ModelParameters,calibration:*,SwAddrMethod,CONST
+```
+
+```matlab
+r = configureAutosarMapping('MotorCtrl'); % Global calibration rules only.
+opts = struct('CalibrationConfig', 'company_calibration.json');
+r = configureAutosarMapping('MotorCtrl', [], opts); % Another shared config.
+```
+
+Set opts.CalibrationConfig='' to disable global rules for a call. Reports expose
+CalibrationMatches and CalibrationConfig. Pass a preview's Snapshot through
+opts.ExpectedSnapshot for guarded CLI apply. The original SwAddrMethod-only
+shorthand below retains its original behavior and does not classify calibration.
 
 The property schema is `Model,Category,Element,Property,Value`. Example rules
 are in [autosar_code_mapping.csv](tools/autosar_mapping/autosar_code_mapping.csv):
@@ -150,7 +209,8 @@ and code-generation validation. No compilation, code generation, dictionary
 element creation, or Adaptive-platform configuration is performed. Export lists
 only properties available on the installed release; R2026b default-method APIs
 are unavailable on R2024a. Run `tests/testAutosarCodeMapping.m` for native fixture
-coverage; production-model code generation is a separate validation step.
+coverage and `tests/testAutosarCalibrationAndGui.m` for global regexp and GUI
+callbacks. Production-model code generation is a separate validation step.
 
 The original SwAddrMethod-only API remains available with
 [autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv):

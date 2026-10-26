@@ -1,5 +1,5 @@
 classdef CodeMappingAdapter
-%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.1.0).
+%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.2.0).
 %   Internal bundle implementation. Uses documented mapping methods only;
 %   unavailable properties are not exported and cannot silently be ignored.
     properties (SetAccess = private)
@@ -73,6 +73,9 @@ classdef CodeMappingAdapter
                 records(end + 1, 1) = local_record("Defaults", "Constants", 'Constants');
             catch
             end
+            [~, categoryOrder] = ismember([records.Category]', categories);
+            [~, order] = sortrows(table(categoryOrder, [records.Element]'), [1 2]);
+            records = records(order);
         end
 
         function record = resolve(obj, category, element)
