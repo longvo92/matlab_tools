@@ -1,6 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
-% Version: 2.0.0 (Signal naming).
+% Version: 2.0.1 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element.
 %   OUT BUS ELEMENT: traces upstream through virtual blocks (From/Goto,
@@ -23,6 +23,7 @@ function report = nameBusElementSignals(sys, opts)
 %     .recurse             (true)  also scan subsystems below SYS
 %     .traceThroughGoto    (true)  trace From -> Goto when tracing an Out
 %                                  Bus Element upstream
+%                                  using Simulink's resolved tag visibility
 %     .traceIntoSubsystem  (true)  descend into SubSystem blocks when tracing
 %     .propagate           (true)  enable propagated labels on the source output port
 %                                  of the line into/out of the bus element port
@@ -200,16 +201,15 @@ end
 
 function gt = local_findMatchingGoto(fromBlk)
     gt     = '';
-    tag    = get_param(fromBlk, 'GotoTag');
-    parent = get_param(fromBlk, 'Parent');
-    cand = find_system(parent, 'SearchDepth', 1, 'LookUnderMasks', 'all', ...
-        'FollowLinks', 'on', 'BlockType', 'Goto', 'GotoTag', tag);
-    if isempty(cand)
-        cand = find_system(bdroot(fromBlk), 'LookUnderMasks', 'all', ...
-            'FollowLinks', 'on', 'BlockType', 'Goto', 'GotoTag', tag);
-    end
-    if ~isempty(cand)
-        gt = cand{1};
+    try
+        % Tag text alone cannot distinguish local, scoped and global routes.
+        match = get_param(fromBlk, 'GotoBlock');
+        if isstruct(match) && isfield(match, 'handle') && ...
+                isscalar(match.handle) && match.handle ~= -1
+            gt = getfullname(match.handle);
+        end
+    catch
+        % Unresolved/invalid routing must never fall back to an unrelated tag.
     end
 end
 

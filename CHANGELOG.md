@@ -2,6 +2,14 @@
 
 ## Interface tools
 
+### 1.10.2 - 2026-10-26
+
+- Generate correct numeric values and preserve multiline descriptions; keep the
+  previous parameter file if generation fails.
+- Detect sheets beyond column AZ and sync exactly the selected sheets.
+- Keep the GUI open during an operation so closing cannot interrupt its controls.
+- Use neutral interface window titles and configurable project defaults.
+
 ### 1.10.1 - 2026-10-20
 
 - Keep Select all changes and Clear changes at the left above the differences
@@ -74,6 +82,11 @@
 
 ## Bus element signal naming
 
+### 2.0.1 - 2026-10-26
+
+- Follow Simulink's resolved Goto visibility in CLI and GUI, preventing changes
+  to unrelated signals with the same tag in other subsystems.
+
 ### 2.0.0 - 2026-10-19
 
 - Remove name-prefix and leaf-element naming from CLI and GUI; always derive
@@ -97,12 +110,23 @@
 
 ## Forbidden block checker
 
+### 1.0.1 - 2026-10-26
+
+- Stop incomplete referenced-model checks instead of returning a passing result.
+- Report single violations consistently with multiple-violation reports.
+
 ### 1.0.0 - 2026-10-19
 
 - Establish the first tracked version of the existing JSON-configured checker:
   check models and references, report warnings, and stop on active violations.
 
 ## Quick simulation setup
+
+### 1.0.1 - 2026-10-26
+
+- Resolve and verify SLDD files outside the MATLAB path, adding their folder to
+  the session path and reporting the resolved dictionary path.
+- Leave the model unlinked and restore the session path when linking fails.
 
 ### 1.0.0 - 2026-10-19
 

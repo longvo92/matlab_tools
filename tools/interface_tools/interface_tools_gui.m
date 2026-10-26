@@ -1,6 +1,6 @@
 function fig = interface_tools_gui(opts)
 %INTERFACE_TOOLS_GUI Preview/sync interfaces and generate parameter M-files.
-% Version: 1.10.1 (Interface tools bundle).
+% Version: 1.10.2 (Interface tools bundle).
 %   interface_tools_gui
 %   fig = interface_tools_gui(struct('ConfigFile', 'my_config.json'))
 %
@@ -33,19 +33,20 @@ function fig = interface_tools_gui(opts)
     parametersFile = '';
     knownSheets = strings(1, 0);
     previewReport = [];
+    busy = false;
     logLines = {'Ready. Choose an Excel workbook.'};
     logClock = tic;
     screen = get(groot, 'ScreenSize');
     windowSize = [min(1180, screen(3)-80), min(920, screen(4)-100)];
 
-    fig = uifigure('Name', 'CVC Interface Tools', ...
+    fig = uifigure('Name', 'Interface Tools', ...
         'Position', [40 40 windowSize], 'Color', [0.97 0.98 0.99], ...
-        'AutoResizeChildren', 'off');
+        'AutoResizeChildren', 'off', 'CloseRequestFcn', @(~, ~) closeGui());
     layout = uigridlayout(fig, [6 1], 'RowHeight', {28, 72, 320, 32, 220, 180}, ...
         'Padding', [16 12 16 12], 'RowSpacing', 8, 'Scrollable', 'on');
     fig.SizeChangedFcn = @(~, ~) resizeLayout();
     resizeLayout();
-    uilabel(layout, 'Text', 'CVC Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
+    uilabel(layout, 'Text', 'Interface Tools', 'FontSize', 20, 'FontWeight', 'bold');
     sourceGrid = uigridlayout(layout, [2 3], 'RowHeight', {30, 22}, ...
         'ColumnWidth', {90, '1x', 90}, 'Padding', [0 0 0 0]);
     uilabel(sourceGrid, 'Text', 'Source XLSX', 'FontWeight', 'bold');
@@ -149,11 +150,15 @@ function fig = interface_tools_gui(opts)
             {'*.xlsx;*.xlsm', 'Excel workbooks (*.xlsx, *.xlsm)'}, ...
             'Select interface XLSX');
         if isequal(filename, 0), return; end
+        if ~isvalid(fig), return; end
         excelEdit.Value = fullfile(folder, filename);
         loadExcel();
     end
 
     function loadExcel()
+        if busy, return; end
+        enableActions('off');
+        restoreButtons = onCleanup(@() enableActions('on'));
         source = strtrim(excelEdit.Value);
         projectRoot = '';
         slddFile = '';
@@ -213,7 +218,7 @@ function fig = interface_tools_gui(opts)
             for k = 1:numel(sheets)
                 try
                     header = readcell(source, 'Sheet', char(sheets(k)), ...
-                        'Range', 'A1:AZ40');
+                        'Range', '1:40');
                     if isInterfaceSheet(header)
                         knownSheets(end+1) = sheets(k); %#ok<AGROW>
                     end
@@ -270,6 +275,9 @@ function fig = interface_tools_gui(opts)
     % Run existing tools
     % ------------------------------------------------------------
     function runTasks(task)
+        if busy, return; end
+        enableActions('off');
+        restoreButtons = onCleanup(@() enableActions('on'));
         source = strtrim(excelEdit.Value);
         doSync = ismember(task, {'preview', 'sync'});
         doParams = strcmp(task, 'parameters');
@@ -327,13 +335,10 @@ function fig = interface_tools_gui(opts)
             if ~strcmp(choice, 'Overwrite'), return; end
         end
 
-        enableActions('off');
-        restoreButtons = onCleanup(@() enableActions('on'));
         try
             if doSync
                 appendLog(sprintf('%s: %d model(s): %s', upper(task), numel(selected), strjoin(selected, ', ')));
                 requested = selected;
-                if numel(selected) == numel(knownSheets), requested = 'all'; end
                 if doApply
                     appendLog(sprintf('Applying %d selected changes ...', sum(chosen)));
                     summary = sync_bus_interfaces_from_excel(source, slddFile, requested, applyOptions);
@@ -366,6 +371,7 @@ function fig = interface_tools_gui(opts)
             end
             appendLog('Finished successfully.');
         catch ME
+            if ~isvalid(fig), return; end
             if doSync
                 resetPreview();
                 detailLabel.Text = 'Run Preview again. See activity log.';
@@ -378,12 +384,18 @@ function fig = interface_tools_gui(opts)
     end
 
     function enableActions(state)
+        busy = strcmp(state, 'off');
         if ~isvalid(fig), return; end
         controls = [actionButtons, inputControls];
         for k = 1:numel(controls)
             controls(k).Enable = state;
         end
         if strcmp(state, 'on'), updateApplyState(); end
+    end
+
+    function closeGui()
+        % Keep controls alive until the current operation and cleanup finish.
+        if ~busy, delete(fig); end
     end
 
     function resetPreview()
@@ -439,6 +451,7 @@ function fig = interface_tools_gui(opts)
         if ~isvalid(fig) || ~followLog.Value, return; end
         logArea.Value = flipud(logLines);
         drawnow;
+        if ~isvalid(fig), return; end
         scroll(logArea, 'top');
         logClock = tic;
     end
@@ -447,7 +460,7 @@ end
 
 function projectRoot = findProjectRoot(xlsxFile, guiFolder, config)
 % Search parent folders from XLSX first, then GUI script, then MATLAB pwd.
-% Also supports MATLAB started in the folder immediately ABOVE EBUS_12M.
+% Also supports MATLAB started immediately above the configured project folder.
     seeds = {fileparts(char(xlsxFile)), guiFolder, pwd};
     for i = 1:numel(seeds)
         folder = seeds{i};

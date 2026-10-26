@@ -1,6 +1,6 @@
 function result = checkForbiddenBlocks(modelName, opts)
 %CHECKFORBIDDENBLOCKS Check a Simulink model for blocks prohibited by JSON rules.
-% Version: 1.0.0 (Forbidden block checker).
+% Version: 1.0.1 (Forbidden block checker).
 %
 %   RESULT = CHECKFORBIDDENBLOCKS() checks the current model.
 %   RESULT = CHECKFORBIDDENBLOCKS(MODELNAME) checks MODELNAME and, by
@@ -18,6 +18,8 @@ function result = checkForbiddenBlocks(modelName, opts)
 %   WarningCount, and a Violations table. A failed check throws
 %   BlockChecker:Failed after building and printing the report so a CI or
 %   code-generation pipeline stops immediately.
+%   Unresolvable referenced models raise BlockChecker:ReferencedModel;
+%   an incomplete reference scan never produces a passing result.
 %
 %   Rules may match BlockType, MaskType, ReferenceBlock, a regular
 %   expression for ReferenceBlock, block path, or block name. Multiple match
@@ -123,7 +125,7 @@ function result = checkForbiddenBlocks(modelName, opts)
     if isempty(violations)
         violationTable = table();
     else
-        violationTable = struct2table(violations);
+        violationTable = struct2table(violations, 'AsArray', true);
     end
 
     errorCount = local_countSeverity(violationTable, 'ERROR');
@@ -216,8 +218,8 @@ function models = local_collectModels(rootModel, checkReferencedModels)
         end
         models = unique([{rootModel}; referencedModels(:)], 'stable');
     catch exc
-        warning('BlockChecker:ReferencedModel', ...
-            'Could not resolve referenced models: %s', exc.message);
+        error('BlockChecker:ReferencedModel', ...
+            'Cannot complete referenced-model checks: %s', exc.message);
     end
 end
 

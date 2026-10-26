@@ -21,10 +21,10 @@
 
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
-| **Bus element signal naming** | `2.0.0` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
-| **Forbidden block checker** | `1.0.0` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
-| **Quick simulation setup** | `1.0.0` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
-| **Interface tools** | `1.10.1` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
+| **Bus element signal naming** | `2.0.1` | CLI and GUI to preview/apply names from In/Out Bus Element ports, trace upstream sources, and enable propagated names. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
+| **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
+| **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
+| **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
 
 ## Quick start
 
@@ -53,11 +53,17 @@ Use `help <functionName>` for options and examples. `quickSimEnv` puts MAT data 
 the model workspace, falling back to the base workspace for incompatible objects
 such as bus objects and config sets. M-file scripts run in the base workspace.
 Pass `'sldd'` to discover a dictionary, or no arguments to create an empty model
-and link the first available config set.
+and link the first available config set. Linking an external SLDD adds its folder
+to the session's MATLAB path and reports the verified full path in `report.sldd`.
+Failed links leave the model unlinked and restore the previous path.
+
+The forbidden block checker stops if a referenced model cannot be resolved.
+Set `opts.checkReferencedModels=false` to explicitly check only the given model.
 
 The signal naming GUI defaults to the current model/subsystem. It provides
 subsystem scope, overwrite, and propagated-name options. Names use the complete
-Element path, with dots replaced by underscores. **Preview** reports proposed
+Element path, with dots replaced by underscores. Goto tracing follows Simulink's
+local, scoped, and global tag resolution. **Preview** reports proposed
 changes; **Apply** edits the model in memory without saving it. Propagated labels
 are enabled on supported source output ports; unsupported blocks report `n/a`.
 In Bus Element selection labels require R2024b or later
@@ -81,6 +87,8 @@ from [`tools/interface_tools/`](tools/interface_tools/) into the same folder.
 
 Edit [interface_tools_config.json](tools/interface_tools/interface_tools_config.json)
 to set `SourceXlsx`, `ProjectRoot`, `SlddFile`, and `ParametersFile`.
+The bundled defaults use neutral `project` and `architecture` folder names,
+`Interfaces.sldd`, and `Parameters.m`; adjust them to your project.
 Use `/` or escaped `\\` in JSON paths. `SourceXlsx` and `ProjectRoot` are relative
 to the config folder; output paths are relative to the project root. Absolute
 paths are accepted.
@@ -97,8 +105,12 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 
 | Panel | Behavior |
 | --- | --- |
-| **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting the output. |
+| **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting; preserves the previous file if generation fails. |
 | **SLDD interfaces** | Preview compares Excel buses and lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick local additions/removals and individual property changes, then click **Apply selected**. Referenced interfaces remain read-only. |
+
+Generated parameters normalize numeric text such as `1,000` to `1000` and retain
+line breaks in descriptions. Generation uses a temporary file before replacing
+the output.
 
 Preview reads **Data Interfaces in Architectural Data** directly from the
 configured SLDD. Only buses named in the selected Excel sheets are compared;
@@ -139,9 +151,11 @@ Run **Preview differences**, tick individual **Apply** checkboxes, then click
 above the differences table, including in narrow windows. Checkboxes start cleared;
 **Select all changes** selects
 editable local ADD/REMOVE/PROPERTY_DIFF rows. Referenced interfaces cannot be
-selected. The table refreshes after Apply and clears the selection. Changing the workbook/sheets clears the preview. If compared data
-changes after Preview, including a change to remove Status, run Preview again
-before applying.
+selected. The table refreshes after Apply and clears the selection. Changing
+the workbook/sheets clears the preview. Operations use exactly the selected
+sheet names, including sheets with headers beyond column AZ. Close the window
+after the current operation finishes. If compared data changes after Preview,
+including a change to remove Status, run Preview again before applying.
 
 ```matlab
 preview = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');
