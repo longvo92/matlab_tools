@@ -1,5 +1,5 @@
 function rules = readAutosarMappingRules(source)
-%READAUTOSARMAPPINGRULES Read per-model SwAddrMethod rules (version 1.2.0).
+%READAUTOSARMAPPINGRULES Read per-model SwAddrMethod rules (version 1.3.0).
 %   RULES = readAutosarMappingRules(CSVFILE) reads a UTF-8 comma-delimited file
 %   with exactly these columns: Model, Type, SwAddrMethod. SOURCE can also be
 %   a table with the same columns. Whitespace is trimmed; Type ignores case.
@@ -10,7 +10,8 @@ function rules = readAutosarMappingRules(source)
 %   StaticMemory, ArTypedPerInstanceMemory. Models use exact, case-sensitive
 %   names without folders/extensions. SwAddrMethod uses a unique SHORT-NAME.
 %
-%   Example: rules = readAutosarMappingRules('autosar_mapping.csv');
+%   Example: rules = readAutosarMappingRules('legacy_mapping.csv');
+%   New configurations use the five-column autosar_code_mapping.csv schema.
 %   Dependencies: MATLAB R2024a or later. No external CSV/YAML library.
 
     columns = {'Model', 'Type', 'SwAddrMethod'};

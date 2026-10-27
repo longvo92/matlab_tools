@@ -1,7 +1,8 @@
 function report = configureAutosarMapping(model, source, opts)
-%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.2.0).
+%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.0).
 %   REPORT = configureAutosarMapping(MODEL, CSVFILE) previews property rules
-%   with columns Model,Category,Element,Property,Value. SOURCE can be a table.
+%   with columns Model,Category,Element,Property,Value. This single CSV also
+%   manages SwAddrMethod. SOURCE can be a table.
 %   MODEL must be loaded; [] selects the current model. Requires R2024a+,
 %   Simulink and AUTOSAR Blockset. See exportAutosarMapping for identifiers.
 %
@@ -16,13 +17,14 @@ function report = configureAutosarMapping(model, source, opts)
 %   All changes to one element are written together so coupled properties
 %   (port/data element, memory type/attributes) never depend on CSV row order.
 %   Defaults are applied before element mappings. Failure restores attempted
-%   elements, including their full readable mapping settings and registration.
+%   changed settings and registration if a native setter fails.
 %
 %   Categories: Inports, Outports, Functions, FunctionCallers, DataTransfers,
 %   ModelParameters, ModelParameterArguments, Signals, States, DataStores,
 %   SynthesizedDataStores, Defaults. Element can be an exported identifier,
 %   '*' for a category, or 'type:StaticMemory' (or another current memory type).
-%   Conflicting/overlapping rules and unmatched selectors are errors.
+%   'type?:StaticMemory' skips a missing type and reports it in SkippedRules.
+%   Conflicting/overlapping rules and unmatched strict selectors are errors.
 %
 %   CSV properties include DataAccessMode (implicit/explicit/queued/E2E),
 %   Port, DataElement, Runnable, Operation, InterRunnableVariable, MappedTo,
@@ -69,6 +71,7 @@ function report = configureAutosarMapping(model, source, opts)
     calibration = autosarMapping.calibrationMatches(records, config);
     before = cell(numel(records), 1);
     for k = 1:numel(records), before{k} = adapter.read(records(k)); end
+    skippedRules = rules([],:);
     assignments = cell(numel(records), 1);
     for k = 1:numel(assignments), assignments{k} = struct(); end
     for row = 1:height(rules)
@@ -80,12 +83,32 @@ function report = configureAutosarMapping(model, source, opts)
         elseif element == "calibration:*"
             names = calibration.Element(calibration.Category == category);
             matches = scope(ismember(string([records(scope).Element]), names));
-        elseif startsWith(element, "type:")
+        elseif startsWith(element, "type:") || startsWith(element, "type?:")
+            optional = startsWith(element, "type?:");
+            if optional, role = extractAfter(element, 6);
+            else, role = extractAfter(element, 5);
+            end
+            if category == "ModelParameters"
+                validRoles = ["Auto", "SharedParameter", "ConstantMemory"];
+            elseif category == "ModelParameterArguments"
+                validRoles = ["Auto", "PerInstanceParameter", "PortParameter"];
+            elseif any(category == ["Signals", "States", "DataStores", "SynthesizedDataStores"])
+                validRoles = ["Auto", "StaticMemory", "ArTypedPerInstanceMemory"];
+            else
+                validRoles = strings(0, 1);
+            end
+            if ~any(role == validRoles)
+                error('AutosarMapping:Value', 'Invalid mapping type selector %s for %s.', element, category);
+            end
             matches = [];
             for k = scope
-                if isfield(before{k}, 'MappedTo') && before{k}.MappedTo == extractAfter(element, 5)
+                if isfield(before{k}, 'MappedTo') && before{k}.MappedTo == role
                     matches(end + 1) = k; %#ok<AGROW>
                 end
+            end
+            if isempty(matches) && optional
+                skippedRules(end + 1, :) = rules(row, :); %#ok<AGROW>
+                continue;
             end
         else
             matches = scope(string([records(scope).Element]) == element);
@@ -176,7 +199,7 @@ function report = configureAutosarMapping(model, source, opts)
     report = struct('Model', adapter.Model, 'Mode', string(mode), 'Elements', plan, ...
         'Changed', changed, 'Applied', sum(plan.Status == "Applied"), ...
         'Compliant', ~any(plan.Status == "Change"), 'CalibrationConfig', config.File, ...
-        'CalibrationMatches', calibration, 'Snapshot', snapshot);
+        'CalibrationMatches', calibration, 'SkippedRules', skippedRules, 'Snapshot', snapshot);
     if nargout == 0
         fprintf('AUTOSAR Code Mappings [%s] %s: %d changes, %d applied.\n', ...
             mode, adapter.Model, changed, report.Applied);

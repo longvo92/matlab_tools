@@ -1,6 +1,15 @@
 Model,Category,Element,Property,Value
 MotorCtrl,Inports,*,DataAccessMode,ExplicitReceive
 MotorCtrl,Outports,*,DataAccessMode,ExplicitSend
-MotorCtrl,Signals,type:StaticMemory,SwAddrMethod,VAR
-MotorCtrl,States,type:ArTypedPerInstanceMemory,SwAddrMethod,VAR
+MotorCtrl,Functions,*,SwAddrMethod,CODE
+MotorCtrl,Functions,Periodic,SwAddrMethodForInternalData,VAR
+MotorCtrl,ModelParameters,type?:ConstantMemory,SwAddrMethod,CONST
+MotorCtrl,ModelParameters,type?:SharedParameter,SwAddrMethod,CONST
+MotorCtrl,Signals,type?:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,States,type?:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,DataStores,type?:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,States,type?:ArTypedPerInstanceMemory,SwAddrMethod,VAR
+MotorCtrl,Signals,type?:ArTypedPerInstanceMemory,SwAddrMethod,VAR
+MotorCtrl,DataStores,type?:ArTypedPerInstanceMemory,SwAddrMethod,VAR
 MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal
+MotorCtrl,Defaults,InternalData,GroupInternalDataByFunction,on

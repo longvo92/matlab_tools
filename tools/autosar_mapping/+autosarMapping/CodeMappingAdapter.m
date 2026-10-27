@@ -1,5 +1,5 @@
 classdef CodeMappingAdapter
-%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.2.0).
+%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.3.0).
 %   Internal bundle implementation. Uses documented mapping methods only;
 %   unavailable properties are not exported and cannot silently be ignored.
     properties (SetAccess = private)
@@ -44,6 +44,12 @@ classdef CodeMappingAdapter
                             ":" + string(get_param(target, 'PortNumber'));
                     elseif any(category == ["States", "DataStores"])
                         element = obj.relative(getfullname(target));
+                    elseif category == "DataTransfers" && isnumeric(target)
+                        % find returns Rate Transition block handles on
+                        % rate-based models, while get/mapDataTransfer require
+                        % the full block path on R2024a.
+                        target = getfullname(target);
+                        element = obj.relative(target);
                     elseif category == "FunctionCallers" && startsWith(string(target), obj.Model + "/")
                         element = obj.relative(target);
                     else
@@ -177,7 +183,8 @@ classdef CodeMappingAdapter
             end
         end
 
-        function write(obj, record, values)
+        function write(obj, record, values, previous)
+            if nargin < 4, previous = struct(); end
             mapping = obj.Mapping;
             t = record.Target;
             switch record.Category
@@ -222,11 +229,14 @@ classdef CodeMappingAdapter
                     end
                     if ~isfield(values, 'MappedTo'), return; end
                     role = values.MappedTo;
+                    roleChanged = ~isfield(previous, 'MappedTo') || previous.MappedTo ~= role;
                     args = {t};
                     if record.Category == "States", args{end + 1} = record.StateName; end
                     args{end + 1} = char(role);
                     for name = obj.dataProperties(record.Category, role)
-                        if isfield(values, char(name))
+                        if isfield(values, char(name)) && (roleChanged || ...
+                                ~isfield(previous, char(name)) || ...
+                                values.(char(name)) ~= previous.(char(name)))
                             args = [args, {char(name), char(values.(char(name)))}]; %#ok<AGROW>
                         end
                     end

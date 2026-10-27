@@ -1,5 +1,5 @@
 function report = mapAutosarSwAddrMethods(model, source, opts)
-%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.2.0).
+%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.3.0).
 %   REPORT = mapAutosarSwAddrMethods(MODEL, CSVFILE) previews all existing
 %   explicit AUTOSAR mappings covered by the model's rules. Pass [] as MODEL
 %   to use the current model. MODEL must already be loaded. SOURCE can also
@@ -31,9 +31,9 @@ function report = mapAutosarSwAddrMethods(model, source, opts)
 %   every configured element to have the desired value. Auto is excluded.
 %
 %   Example:
-%     r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv');
+%     r = mapAutosarSwAddrMethods('MotorCtrl', 'legacy_mapping.csv');
 %     disp(r.Elements)
-%     r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv', ...
+%     r = mapAutosarSwAddrMethods('MotorCtrl', 'legacy_mapping.csv', ...
 %         struct('Mode', 'apply'));
 %     save_system('MotorCtrl'); % Explicit persistence, after review.
 %

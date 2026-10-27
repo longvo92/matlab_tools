@@ -1,8 +1,9 @@
 function rules = readAutosarCodeMappingRules(source)
-%READAUTOSARCODEMAPPINGRULES Read property-based Code Mappings CSV (v1.2.0).
+%READAUTOSARCODEMAPPINGRULES Read property-based Code Mappings CSV (v1.3.0).
 %   Columns: Model, Category, Element, Property, Value. Element is an exact
-%   exported identifier, '*' for the category, or 'type:StaticMemory' (etc.)
-%   for existing data mapping types. Empty Value explicitly clears a value.
+%   exported identifier, '*' for the category, 'type:StaticMemory' for a
+%   required current mapping type, or 'type?:StaticMemory' for an optional
+%   type. Empty Value explicitly clears a value.
 %   SOURCE can also be a table. No MATLAB expressions are evaluated.
 %   See configureAutosarMapping and exportAutosarMapping. MATLAB R2024a+.
     names = {'Model', 'Category', 'Element', 'Property', 'Value'};

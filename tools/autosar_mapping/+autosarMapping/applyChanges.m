@@ -1,5 +1,5 @@
 function applyChanges(model, plan, readValue, writeValue)
-%APPLYCHANGES Internal SwAddrMethod transaction helper (version 1.2.0).
+%APPLYCHANGES Internal SwAddrMethod transaction helper (version 1.3.0).
 %   Uses the preflight plan and native mapping callbacks. Tests can inject
 %   setter failures without replacing MATLAB's AUTOSAR API on the path.
     changed = find(plan.Status == "Change");

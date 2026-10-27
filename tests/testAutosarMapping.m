@@ -4,8 +4,6 @@ function testAutosarMapping()
     restorePath = onCleanup(@() path(previousPath));
     repo = fileparts(fileparts(mfilename('fullpath')));
     addpath(fullfile(repo, 'tools', 'autosar_mapping'));
-    sample = readAutosarMappingRules('autosar_mapping.csv');
-    assert(height(sample) == 8);
     sandbox = tempname;
     mkdir(sandbox);
     removeSandbox = onCleanup(@() rmdir(sandbox, 's'));

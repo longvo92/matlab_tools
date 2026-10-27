@@ -1,5 +1,5 @@
 function fig = autosarMappingGui(model, opts)
-%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.2.0).
+%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.3.0).
 %   autosarMappingGui opens a simple GUI for a loaded AUTOSAR Classic model.
 %   autosarMappingGui(MODEL, OPTS) optionally sets Source (model CSV),
 %   CalibrationConfig (global JSON, '' disables), and Visible ('on'/'off').
@@ -29,7 +29,7 @@ function fig = autosarMappingGui(model, opts)
         if ~isequal(current, 0) && ~isempty(current), selected = get_param(current, 'Name'); end
     end
     preview = [];
-    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.2.0', 'Tag', 'AutosarMappingGui', ...
+    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.3.0', 'Tag', 'AutosarMappingGui', ...
         'Position', [180 150 1080 650], 'Visible', 'off', 'CloseRequestFcn', @closeWindow);
     grid = uigridlayout(fig, [6 1], 'RowHeight', {32, 32, 32, 34, '1x', 62}, ...
         'Padding', [12 12 12 12]);
@@ -134,8 +134,9 @@ function fig = autosarMappingGui(model, opts)
         if isempty(report.CalibrationMatches) && report.CalibrationConfig ~= ""
             detail = 'No calibration names matched. Check global IncludePatterns/ExcludePatterns; empty includes match nothing.';
         end
-        status.Value = {sprintf('%s: %d changes, %d applied. Calibration names matched: %d.', ...
-            report.Mode, report.Changed, report.Applied, height(report.CalibrationMatches)), detail};
+        status.Value = {sprintf('%s: %d changes, %d applied. Calibration names matched: %d. Optional rules skipped: %d.', ...
+            report.Mode, report.Changed, report.Applied, height(report.CalibrationMatches), ...
+            height(report.SkippedRules)), detail};
     end
 
     function showError(cause)

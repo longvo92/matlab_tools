@@ -2,6 +2,14 @@
 
 ## AUTOSAR Code Mappings
 
+### 1.3.0 - 2026-10-27
+
+- Use one property-based CSV for Code Mapping and SwAddrMethod rules; retain
+  support for existing three-column SwAddrMethod files.
+- Support optional `type?:` selectors for mapping types absent from a model.
+- Read rate-based Data Transfers by full Rate Transition path and apply only
+  changed data attributes when a mapping role stays the same.
+
 ### 1.2.0 - 2026-10-26
 
 - Share calibration naming regexp across models through a separate JSON config,
