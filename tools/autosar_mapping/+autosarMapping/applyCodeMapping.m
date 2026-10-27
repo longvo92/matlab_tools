@@ -1,19 +1,19 @@
 function applyCodeMapping(adapter, tasks)
-%APPLYCODEMAPPING Apply grouped native mappings with recovery (v1.2.0).
+%APPLYCODEMAPPING Apply grouped native mappings with recovery (v1.3.0).
     dirty = get_param(char(adapter.Model), 'Dirty');
     attempted = [];
     try
         for k = 1:numel(tasks)
             if ~tasks(k).Changed, continue; end
             attempted(end + 1) = k; %#ok<AGROW>
-            adapter.write(tasks(k).Record, tasks(k).After);
+            adapter.write(tasks(k).Record, tasks(k).After, tasks(k).Before);
         end
         for k = 1:numel(tasks)
             local_verify(adapter.read(tasks(k).Record), tasks(k).After, tasks(k).Record.Element);
         end
     catch cause
         failure = MException('AutosarMapping:ApplyFailed', ...
-            'Code Mapping apply failed in %s; attempted full mapping rollback. Inspect exception causes.', adapter.Model);
+            'Code Mapping apply failed in %s; attempted mapping rollback. Inspect exception causes.', adapter.Model);
         failure = addCause(failure, cause);
         restored = true;
         % Native mappings can share an AUTOSAR entity. Restore matching rows
@@ -30,7 +30,14 @@ function applyCodeMapping(adapter, tasks)
         end
         for k = fliplr(find(restore))
             try
-                adapter.write(tasks(k).Record, tasks(k).Before);
+                try
+                    current = adapter.read(tasks(k).Record);
+                catch
+                    % A partial native write may make the mapping unreadable.
+                    % In that case, attempt a full restore from the snapshot.
+                    current = struct();
+                end
+                adapter.write(tasks(k).Record, tasks(k).Before, current);
                 local_verify(adapter.read(tasks(k).Record), tasks(k).Before, tasks(k).Record.Element);
             catch rollbackCause
                 restored = false;

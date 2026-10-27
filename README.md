@@ -26,7 +26,7 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
-| **AUTOSAR Code Mappings** | `1.2.0` | CLI/GUI to preview/apply per-model mapping rules, with global calibration regexp, access modes, memory/calibration/NVRAM settings and defaults. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
+| **AUTOSAR Code Mappings** | `1.3.0` | CLI/GUI to preview/apply per-model mapping rules, including SwAddrMethod, access modes, memory/calibration/NVRAM settings and defaults in one CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
@@ -163,8 +163,8 @@ r = configureAutosarMapping('MotorCtrl', [], opts); % Another shared config.
 
 Set opts.CalibrationConfig='' to disable global rules for a call. Reports expose
 CalibrationMatches and CalibrationConfig. Pass a preview's Snapshot through
-opts.ExpectedSnapshot for guarded CLI apply. The original SwAddrMethod-only
-shorthand below retains its original behavior and does not classify calibration.
+opts.ExpectedSnapshot for guarded CLI apply. The legacy SwAddrMethod-only API
+remains available for existing three-column files and does not classify calibration.
 
 The property schema is `Model,Category,Element,Property,Value`. Example rules
 are in [autosar_code_mapping.csv](tools/autosar_mapping/autosar_code_mapping.csv):
@@ -173,8 +173,12 @@ are in [autosar_code_mapping.csv](tools/autosar_mapping/autosar_code_mapping.csv
 Model,Category,Element,Property,Value
 MotorCtrl,Inports,*,DataAccessMode,ExplicitReceive
 MotorCtrl,Outports,*,DataAccessMode,ExplicitSend
-MotorCtrl,Signals,type:StaticMemory,SwAddrMethod,VAR
+MotorCtrl,Functions,*,SwAddrMethod,CODE
+MotorCtrl,Functions,Periodic,SwAddrMethodForInternalData,VAR
+MotorCtrl,ModelParameters,type?:ConstantMemory,SwAddrMethod,CONST
+MotorCtrl,Signals,type?:StaticMemory,SwAddrMethod,VAR
 MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal
+MotorCtrl,Defaults,InternalData,GroupInternalDataByFunction,on
 ```
 
 | Category | Settings |
@@ -187,12 +191,21 @@ MotorCtrl,Defaults,InternalData,Packaging,PrivateGlobal
 | `Defaults` | InternalData: Packaging and GroupInternalDataByFunction; InportsOutports: EndToEndProtectionMethod. InternalData/Constants SwAddrMethod defaults are available only on releases exposing those public APIs. |
 
 Use exact exported identifiers, `*` for a category, or `type:StaticMemory` (etc.)
-for its **current** memory type. Signals use `block/path:port`; named states can
+for its **current** memory type. `type?:StaticMemory` skips the row and lists it
+in `report.SkippedRules` when the model currently has no element of that type;
+`type:` still requires a match. This keeps a shared type policy in one CSV even
+when some models have no parameters, signals, or states of a configured type.
+Signals use `block/path:port`; named states can
 be targeted with `block/path#StateName`. Native state discovery exports block
 owners; add named-state rules explicitly for blocks with multiple named states.
 `Registered=true/false` explicitly adds/removes signal or synthesized-store
 mappings; Registered=false must be the only rule for that element.
 New synthesized stores require a model-workspace Simulink.Signal.
+
+`RestoreAtStart` and `StoreAtShutdown` are active only when
+`NeedsNVRAMAccess=true`. Export omits them when NVRAM access is false; older
+CSVs containing these inactive fields remain usable and show them as `Ignored`
+in preview and apply reports.
 
 Models use exact names without folders/extensions. Categories ignore case;
 properties and native enum values use their exported spelling. Empty Value
@@ -205,7 +218,7 @@ Pass `[]` as the model to use the current model.
 Coupled properties are applied together regardless of CSV row order. Changing
 MappedTo preserves compatible settings and discards properties unavailable for
 the new role. Defaults apply first; native readback verifies all configured
-settings. Failed operations attempt to restore full readable settings and
+settings. Failed operations attempt to restore changed settings and
 registration; exception causes include rollback failures. The tool never saves
 the model or traverses references. Run each referenced model explicitly.
 
@@ -220,42 +233,17 @@ are unavailable on R2024a. Run `tests/testAutosarCodeMapping.m` for native fixtu
 coverage and `tests/testAutosarCalibrationAndGui.m` for global regexp and GUI
 callbacks. Production-model code generation is a separate validation step.
 
-The original SwAddrMethod-only API remains available with
-[autosar_mapping.csv](tools/autosar_mapping/autosar_mapping.csv):
+Use the five-column CSV above for all new configurations, including
+SwAddrMethod. `mapAutosarSwAddrMethods` still accepts existing three-column
+`Model,Type,SwAddrMethod` files; `readAutosarMappingRules` validates them. No
+separate three-column example file is shipped. Methods must already exist in the
+model or its AUTOSAR dictionary with compatible SectionType. On R2024a,
+`SwAddrMethodForInternalData` also requires `GroupInternalDataByFunction=on`.
 
-```csv
-Model,Type,SwAddrMethod
-MotorCtrl,Runnable,CODE
-MotorCtrl,ConstantMemory,CONST
-MotorCtrl,SharedParameter,CONST
-MotorCtrl,StaticMemory,VAR
-MotorCtrl,ArTypedPerInstanceMemory,VAR
-BatteryCtrl,Runnable,BATTERY_CODE
-```
-
-Each `(Model, Type)` occurs once; types ignore case. Supported types are
-Runnable, RunnableInternalData, ConstantMemory, SharedParameter, StaticMemory,
-and ArTypedPerInstanceMemory. All explicit mappings of a type use the same
-method in that model. This shorthand leaves Auto mappings and unconfigured types
-unchanged and operates on model workspace parameters, registered signals, states,
-and Data Store Memory blocks. Use the property API above for parameter arguments
-and other settings.
-
-```matlab
-r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv');
-r = mapAutosarSwAddrMethods('MotorCtrl', 'autosar_mapping.csv', struct('Mode', 'apply'));
-```
-
-`r.Rules.Matched` exposes rules with no matching elements; `r.Compliant` requires
-every rule to match and every configured element to have the desired method.
-
-Methods must already exist in the model with unique SHORT-NAMEs. SectionType
-must be `Code` for Runnable, `Const` for ConstantMemory, `Const` or `Calprm` for
-SharedParameter, and `Var` for variable memory. The optional
-`RunnableInternalData` type requires `GroupInternalDataByFunction='on'` and a
-`Var` method. Initialize, terminate, and reset functions have no configurable
-internal-data method and are reported as ignored. Unsupported or ambiguous
-rules stop the operation before any mapping changes.
+For the legacy API, `r.Rules.Matched` shows unmatched shorthand rules and
+`r.Compliant` requires every rule to match. Its RunnableInternalData type skips
+initialize, terminate, and reset functions. Both APIs check method names and
+SectionType before changing mappings.
 
 Run `tests/testAutosarMapping.m` for shorthand API regression coverage. The native
 workflow is described in [MathWorks AUTOSAR mapping API](https://www.mathworks.com/help/autosar/ref/autosar.api.getsimulinkmapping.html).

@@ -13,6 +13,21 @@ function testAutosarCodeMapping()
     local_fixture(model);
     mapping = autosar.api.getSimulinkMapping(model);
     baseline = exportAutosarMapping(model);
+    sample = readAutosarCodeMappingRules(fullfile(repo, 'tools', 'autosar_mapping', ...
+        'autosar_code_mapping.csv'));
+    assert(any(sample.Property == "SwAddrMethod") && ...
+        any(sample.Property == "DataAccessMode"));
+    optional = local_rules(model, ["Signals"; "Inports"], ...
+        ["type?:ArTypedPerInstanceMemory"; "Input"], ...
+        ["SwAddrMethod"; "DataAccessMode"], ["AppPim"; "ExplicitReceive"]);
+    optionalPreview = configureAutosarMapping(model, optional);
+    assert(height(optionalPreview.SkippedRules) == 1 && ...
+        optionalPreview.SkippedRules.Element == "type?:ArTypedPerInstanceMemory");
+    strict = optional(1, :);
+    strict.Element = "type:ArTypedPerInstanceMemory";
+    local_error(@() configureAutosarMapping(model, strict), 'AutosarMapping:UnmatchedRule');
+    strict.Element = "type?:UnknownRole";
+    local_error(@() configureAutosarMapping(model, strict), 'AutosarMapping:Value');
     assert(all(ismember(["Inports", "Outports", "Functions", "FunctionCallers", ...
         "ModelParameters", "ModelParameterArguments", "Signals", "States", ...
         "DataStores", "SynthesizedDataStores", "Defaults"], unique(baseline.Category))));
@@ -89,8 +104,11 @@ function testAutosarCodeMapping()
     assert(ns.Compliant);
     local_registration(model);
     local_transfers();
+    local_rateTransfers();
+    local_sharedEntityRollback();
+    local_inactiveNvBlockNeeds();
     local_busPorts();
-    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, rollback.\n');
+    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, inactive NvBlockNeeds, shared-entity rollback.\n');
 end
 
 function local_fixture(model)
@@ -209,6 +227,109 @@ function local_transfers()
         roundtrip = configureAutosarMapping(model, exportAutosarMapping(model));
         assert(roundtrip.Compliant);
     end
+end
+
+function local_rateTransfers()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    set_param(model, 'SystemTargetFile', 'autosar.tlc', 'Solver', 'FixedStepDiscrete', ...
+        'FixedStep', '0.1', 'SolverMode', 'MultiTasking');
+    add_block('simulink/Sources/In1', [model '/Input'], 'SampleTime', '0.1');
+    add_block('simulink/Signal Attributes/Rate Transition', [model '/Transfer'], ...
+        'OutPortSampleTime', '0.2', 'Integrity', 'on', 'Deterministic', 'off');
+    add_block('simulink/Sinks/Out1', [model '/Output']);
+    add_line(model, 'Input/1', 'Transfer/1');
+    add_line(model, 'Transfer/1', 'Output/1');
+    autosar.api.create(model, 'default');
+    properties = autosar.api.getAUTOSARProperties(model);
+    component = properties.find([], 'AtomicComponent', 'PathType', 'FullyQualified');
+    behavior = properties.get(component{1}, 'Behavior');
+    properties.add(behavior, 'IRV', 'TestIRV');
+    mapping = autosar.api.getSimulinkMapping(model);
+    mapping.mapDataTransfer([model '/Transfer'], 'TestIRV', 'Implicit');
+    exported = exportAutosarMapping(model);
+    transfer = exported(exported.Category == "DataTransfers", :);
+    assert(height(transfer) == 2 && all(transfer.Element == "Transfer"));
+    assert(configureAutosarMapping(model, transfer).Compliant);
+    transfer.Value(transfer.Property == "DataAccessMode") = "Explicit";
+    result = configureAutosarMapping(model, transfer, struct('Mode', 'apply'));
+    assert(result.Compliant && result.Applied == 1);
+    [~, mode] = mapping.getDataTransfer([model '/Transfer']);
+    assert(strcmp(mode, 'Explicit'));
+end
+
+function local_sharedEntityRollback()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    set_param(model, 'Dirty', 'off');
+    oldShared = struct('SwAddrMethod', "OldShared");
+    newShared = struct('SwAddrMethod', "NewShared");
+    oldOther = struct('SwAddrMethod', "OldOther");
+    newOther = struct('SwAddrMethod', "NewOther");
+    values = {oldShared, oldShared, oldOther};
+    injectFailure = true;
+    adapter = struct('Model', string(model), 'read', @read, 'write', @write);
+    records = struct('Index', {1, 2, 3}, 'Element', {"First", "Shared", "Failing"});
+    tasks = struct('Record', num2cell(records), ...
+        'Before', {oldShared, oldShared, oldOther}, ...
+        'After', {newShared, oldShared, newOther}, ...
+        'Changed', {true, false, true});
+    failure = local_error(@() autosarMapping.applyCodeMapping(adapter, tasks), ...
+        'AutosarMapping:ApplyFailed');
+    assert(numel(failure.cause) == 1 && ...
+        strcmp(failure.cause{1}.identifier, 'Test:InjectedWrite'));
+    assert(isequal(values, {oldShared, oldShared, oldOther}));
+    assert(strcmp(get_param(model, 'Dirty'), 'off'));
+
+    function value = read(record)
+        value = values{record.Index};
+    end
+
+    function write(record, desired, previous)
+        if record.Index == 3 && injectFailure
+            injectFailure = false;
+            error('Test:InjectedWrite', 'Simulated native setter failure.');
+        end
+        if ~isfield(previous, 'SwAddrMethod') || ...
+                previous.SwAddrMethod ~= desired.SwAddrMethod
+            values{record.Index} = desired;
+            if record.Index <= 2
+                values{3 - record.Index} = desired;
+            end
+        end
+    end
+end
+
+function local_inactiveNvBlockNeeds()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    set_param(model, 'SystemTargetFile', 'autosar.tlc');
+    add_block('simulink/Signal Routing/Data Store Memory', [model '/Memory'], ...
+        'DataStoreName', 'Memory');
+    autosar.api.create(model, 'default');
+    mapping = autosar.api.getSimulinkMapping(model);
+    block = [model '/Memory'];
+    mapping.mapDataStore(block, 'ArTypedPerInstanceMemory');
+    exported = exportAutosarMapping(model);
+    rows = exported(exported.Category == "DataStores", :);
+    assert(~any(ismember(rows.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+
+    % Older exports include latent true values while NVRAM access is false.
+    legacy = [rows; local_rules(model, ["DataStores"; "DataStores"], ...
+        ["Memory"; "Memory"], ["RestoreAtStart"; "StoreAtShutdown"], ...
+        ["true"; "true"])];
+    mapping.mapDataStore(block, 'Auto');
+    preview = configureAutosarMapping(model, legacy);
+    ignored = preview.Elements(preview.Elements.Status == "Ignored", :);
+    assert(height(ignored) == 2 && ...
+        all(ismember(ignored.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+    applied = configureAutosarMapping(model, legacy, struct('Mode', 'apply'));
+    assert(applied.Compliant && strcmp(mapping.getDataStore(block), 'ArTypedPerInstanceMemory'));
+    assert(strcmp(mapping.getDataStore(block, 'NeedsNVRAMAccess'), 'false'));
+    assert(configureAutosarMapping(model, legacy).Changed == 0);
 end
 
 function local_busPorts()

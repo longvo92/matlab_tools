@@ -1,11 +1,12 @@
 function rules = exportAutosarMapping(model, filename)
-%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.2.0).
+%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.3.0).
 %   RULES = exportAutosarMapping(MODEL) returns property rules for the loaded
 %   AUTOSAR Classic model. [] uses the current model. No model changes occur.
 %   exportAutosarMapping(MODEL, CSVFILE) writes a new UTF-8 CSV. Existing files
 %   are never overwritten. Edit the exported rules and pass them to
 %   configureAutosarMapping. Requires MATLAB/Simulink R2024a+, AUTOSAR Blockset.
 %   Unsupported, inapplicable and unavailable-release properties are excluded.
+%   Inactive NvBlockNeeds fields are omitted when NeedsNVRAMAccess=false.
     adapter = autosarMapping.CodeMappingAdapter(model);
     records = adapter.inventory();
     rules = array2table(strings(0, 5), 'VariableNames', {'Model', 'Category', 'Element', 'Property', 'Value'});

@@ -1,9 +1,0 @@
-Model,Type,SwAddrMethod
-MotorCtrl,Runnable,CODE
-MotorCtrl,RunnableInternalData,VAR
-MotorCtrl,ConstantMemory,CONST
-MotorCtrl,SharedParameter,CONST
-MotorCtrl,StaticMemory,VAR
-MotorCtrl,ArTypedPerInstanceMemory,VAR
-BatteryCtrl,Runnable,CODE
-BatteryCtrl,StaticMemory,VAR

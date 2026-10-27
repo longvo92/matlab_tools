@@ -2,6 +2,18 @@
 
 ## AUTOSAR Code Mappings
 
+### 1.3.0 - 2026-10-27
+
+- Use one property-based CSV for Code Mapping and SwAddrMethod rules; retain
+  support for existing three-column SwAddrMethod files.
+- Support optional `type?:` selectors for mapping types absent from a model.
+- Read rate-based Data Transfers by full Rate Transition path and apply only
+  changed data attributes when a mapping role stays the same.
+- Omit inactive NvBlockNeeds fields from exports and ignore them in older CSVs
+  when NeedsNVRAMAccess is false, including Auto-to-PIM remapping.
+- Return focus to the AUTOSAR mapping GUI after file selection dialogs close
+  on MATLAB R2024a.
+
 ### 1.2.0 - 2026-10-26
 
 - Share calibration naming regexp across models through a separate JSON config,
