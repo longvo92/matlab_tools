@@ -106,8 +106,9 @@ function testAutosarCodeMapping()
     local_transfers();
     local_rateTransfers();
     local_sharedEntityRollback();
+    local_inactiveNvBlockNeeds();
     local_busPorts();
-    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, shared-entity rollback.\n');
+    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, inactive NvBlockNeeds, shared-entity rollback.\n');
 end
 
 function local_fixture(model)
@@ -299,6 +300,36 @@ function local_sharedEntityRollback()
             end
         end
     end
+end
+
+function local_inactiveNvBlockNeeds()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    set_param(model, 'SystemTargetFile', 'autosar.tlc');
+    add_block('simulink/Signal Routing/Data Store Memory', [model '/Memory'], ...
+        'DataStoreName', 'Memory');
+    autosar.api.create(model, 'default');
+    mapping = autosar.api.getSimulinkMapping(model);
+    block = [model '/Memory'];
+    mapping.mapDataStore(block, 'ArTypedPerInstanceMemory');
+    exported = exportAutosarMapping(model);
+    rows = exported(exported.Category == "DataStores", :);
+    assert(~any(ismember(rows.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+
+    % Older exports include latent true values while NVRAM access is false.
+    legacy = [rows; local_rules(model, ["DataStores"; "DataStores"], ...
+        ["Memory"; "Memory"], ["RestoreAtStart"; "StoreAtShutdown"], ...
+        ["true"; "true"])];
+    mapping.mapDataStore(block, 'Auto');
+    preview = configureAutosarMapping(model, legacy);
+    ignored = preview.Elements(preview.Elements.Status == "Ignored", :);
+    assert(height(ignored) == 2 && ...
+        all(ismember(ignored.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+    applied = configureAutosarMapping(model, legacy, struct('Mode', 'apply'));
+    assert(applied.Compliant && strcmp(mapping.getDataStore(block), 'ArTypedPerInstanceMemory'));
+    assert(strcmp(mapping.getDataStore(block, 'NeedsNVRAMAccess'), 'false'));
+    assert(configureAutosarMapping(model, legacy).Changed == 0);
 end
 
 function local_busPorts()

@@ -9,6 +9,8 @@
 - Support optional `type?:` selectors for mapping types absent from a model.
 - Read rate-based Data Transfers by full Rate Transition path and apply only
   changed data attributes when a mapping role stays the same.
+- Omit inactive NvBlockNeeds fields from exports and ignore them in older CSVs
+  when NeedsNVRAMAccess is false, including Auto-to-PIM remapping.
 
 ### 1.2.0 - 2026-10-26
 

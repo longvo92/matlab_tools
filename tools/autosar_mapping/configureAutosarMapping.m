@@ -32,6 +32,8 @@ function report = configureAutosarMapping(model, source, opts)
 %   InportsOutports. Registered=true/false explicitly adds/removes Signals
 %   or SynthesizedDataStores. Empty Value explicitly clears an attribute.
 %   Unknown settings are errors. No config values are evaluated as MATLAB.
+%   RestoreAtStart/StoreAtShutdown are ignored when NeedsNVRAMAccess=false;
+%   they are inactive native attributes and appear as Ignored in the report.
 %
 %   Preview checks schema, selectors, property applicability and scalar enums.
 %   Native context restrictions (interface direction, queued/event semantics,
@@ -174,11 +176,17 @@ function report = configureAutosarMapping(model, source, opts)
         for name = string(fieldnames(edited))'
             current = "";
             if isfield(before{k}, char(name)), current = before{k}.(char(name)); end
-            desired = after.(char(name));
-            status = "Unchanged";
-            if current ~= desired, status = "Change"; changed = true; end
             reason = "";
             if isfield(origins{k}, char(name)), reason = origins{k}.(char(name)); end
+            if isfield(after, char(name))
+                desired = after.(char(name));
+                status = "Unchanged";
+                if current ~= desired, status = "Change"; changed = true; end
+            else
+                desired = edited.(char(name));
+                status = "Ignored";
+                reason = "NvBlockNeeds requires NeedsNVRAMAccess=true.";
+            end
             plan(end + 1, :) = {records(k).Category, records(k).Element, name, current, desired, status, reason}; %#ok<AGROW>
         end
         tasks(end + 1) = struct('Record', records(k), 'Before', before{k}, ...

@@ -6,6 +6,7 @@ function rules = exportAutosarMapping(model, filename)
 %   are never overwritten. Edit the exported rules and pass them to
 %   configureAutosarMapping. Requires MATLAB/Simulink R2024a+, AUTOSAR Blockset.
 %   Unsupported, inapplicable and unavailable-release properties are excluded.
+%   Inactive NvBlockNeeds fields are omitted when NeedsNVRAMAccess=false.
     adapter = autosarMapping.CodeMappingAdapter(model);
     records = adapter.inventory();
     rules = array2table(strings(0, 5), 'VariableNames', {'Model', 'Category', 'Element', 'Property', 'Value'});

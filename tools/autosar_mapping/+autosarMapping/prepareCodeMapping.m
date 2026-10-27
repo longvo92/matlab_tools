@@ -27,10 +27,15 @@ function after = prepareCodeMapping(adapter, record, before, edited)
                 adapter.dataProperties(record.Category, "ArTypedPerInstanceMemory")];
         end
     end
+    inactiveNvBlockNeeds = isfield(after, 'MappedTo') && ...
+        after.MappedTo == "ArTypedPerInstanceMemory" && ...
+        isfield(after, 'NeedsNVRAMAccess') && after.NeedsNVRAMAccess == "false";
     for name = string(fieldnames(edited))'
         if ~any(name == valid), error('AutosarMapping:Property', 'Unavailable setting %s/%s.', record.Category, name); end
         if isfield(before, 'MappedTo') && before.MappedTo == after.MappedTo && ...
-                ~isfield(before, char(name)) && name ~= "Registered"
+                ~isfield(before, char(name)) && name ~= "Registered" && ...
+                ~(isfield(before, 'NeedsNVRAMAccess') && ...
+                any(name == ["RestoreAtStart", "StoreAtShutdown"]))
             error('AutosarMapping:Property', 'Setting %s is not exposed for this element on the installed release.', name);
         end
         value = after.(char(name));
@@ -77,6 +82,11 @@ function after = prepareCodeMapping(adapter, record, before, edited)
             if ~any(strcmpi(section, allowed))
                 error('AutosarMapping:SectionType', '%s has incompatible SectionType %s.', value, section);
             end
+        end
+    end
+    if inactiveNvBlockNeeds
+        for name = ["RestoreAtStart", "StoreAtShutdown"]
+            if isfield(after, char(name)), after = rmfield(after, char(name)); end
         end
     end
     if isfield(after, 'Registered') && after.Registered == "false"

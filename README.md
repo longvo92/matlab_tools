@@ -202,6 +202,11 @@ owners; add named-state rules explicitly for blocks with multiple named states.
 mappings; Registered=false must be the only rule for that element.
 New synthesized stores require a model-workspace Simulink.Signal.
 
+`RestoreAtStart` and `StoreAtShutdown` are active only when
+`NeedsNVRAMAccess=true`. Export omits them when NVRAM access is false; older
+CSVs containing these inactive fields remain usable and show them as `Ignored`
+in preview and apply reports.
+
 Models use exact names without folders/extensions. Categories ignore case;
 properties and native enum values use their exported spelling. Empty Value
 explicitly clears an attribute; omitting a row leaves it unmanaged. Each resolved

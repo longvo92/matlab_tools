@@ -164,6 +164,17 @@ classdef CodeMappingAdapter
                         catch
                         end
                     end
+                    if role == "ArTypedPerInstanceMemory" && ...
+                            isfield(values, 'NeedsNVRAMAccess') && ...
+                            values.NeedsNVRAMAccess == "false"
+                        % R2024a reports latent NvBlockNeeds values even when
+                        % NVRAM access is off. They cannot be set in this state.
+                        for name = ["RestoreAtStart", "StoreAtShutdown"]
+                            if isfield(values, char(name))
+                                values = rmfield(values, char(name));
+                            end
+                        end
+                    end
                     if ~any(record.Category == ["Signals", "SynthesizedDataStores"])
                         values = rmfield(values, 'Registered');
                     end
