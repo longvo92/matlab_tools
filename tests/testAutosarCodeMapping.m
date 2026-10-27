@@ -105,8 +105,9 @@ function testAutosarCodeMapping()
     local_registration(model);
     local_transfers();
     local_rateTransfers();
+    local_sharedEntityRollback();
     local_busPorts();
-    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, rollback.\n');
+    fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, shared-entity rollback.\n');
 end
 
 function local_fixture(model)
@@ -255,6 +256,49 @@ function local_rateTransfers()
     assert(result.Compliant && result.Applied == 1);
     [~, mode] = mapping.getDataTransfer([model '/Transfer']);
     assert(strcmp(mode, 'Explicit'));
+end
+
+function local_sharedEntityRollback()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    set_param(model, 'Dirty', 'off');
+    oldShared = struct('SwAddrMethod', "OldShared");
+    newShared = struct('SwAddrMethod', "NewShared");
+    oldOther = struct('SwAddrMethod', "OldOther");
+    newOther = struct('SwAddrMethod', "NewOther");
+    values = {oldShared, oldShared, oldOther};
+    injectFailure = true;
+    adapter = struct('Model', string(model), 'read', @read, 'write', @write);
+    records = struct('Index', {1, 2, 3}, 'Element', {"First", "Shared", "Failing"});
+    tasks = struct('Record', num2cell(records), ...
+        'Before', {oldShared, oldShared, oldOther}, ...
+        'After', {newShared, oldShared, newOther}, ...
+        'Changed', {true, false, true});
+    failure = local_error(@() autosarMapping.applyCodeMapping(adapter, tasks), ...
+        'AutosarMapping:ApplyFailed');
+    assert(numel(failure.cause) == 1 && ...
+        strcmp(failure.cause{1}.identifier, 'Test:InjectedWrite'));
+    assert(isequal(values, {oldShared, oldShared, oldOther}));
+    assert(strcmp(get_param(model, 'Dirty'), 'off'));
+
+    function value = read(record)
+        value = values{record.Index};
+    end
+
+    function write(record, desired, previous)
+        if record.Index == 3 && injectFailure
+            injectFailure = false;
+            error('Test:InjectedWrite', 'Simulated native setter failure.');
+        end
+        if ~isfield(previous, 'SwAddrMethod') || ...
+                previous.SwAddrMethod ~= desired.SwAddrMethod
+            values{record.Index} = desired;
+            if record.Index <= 2
+                values{3 - record.Index} = desired;
+            end
+        end
+    end
 end
 
 function local_busPorts()

@@ -30,7 +30,14 @@ function applyCodeMapping(adapter, tasks)
         end
         for k = fliplr(find(restore))
             try
-                adapter.write(tasks(k).Record, tasks(k).Before, tasks(k).After);
+                try
+                    current = adapter.read(tasks(k).Record);
+                catch
+                    % A partial native write may make the mapping unreadable.
+                    % In that case, attempt a full restore from the snapshot.
+                    current = struct();
+                end
+                adapter.write(tasks(k).Record, tasks(k).Before, current);
                 local_verify(adapter.read(tasks(k).Record), tasks(k).Before, tasks(k).Record.Element);
             catch rollbackCause
                 restored = false;
