@@ -163,10 +163,20 @@ function fig = autosarMappingGui(model, opts)
 
     function browseFile(field, filter)
         if isBusy(), return; end
+        restoreFocus = onCleanup(@() refocus(field));
         [name, folder] = uigetfile(filter);
         if isequal(name, 0), return; end
         field.Value = fullfile(folder, name);
         invalidate();
+    end
+
+    function refocus(target)
+        if ~isvalid(fig) || ~isvalid(target) || strcmp(fig.Visible, 'off'), return; end
+        drawnow;
+        if isvalid(fig) && isvalid(target) && strcmp(fig.Visible, 'on') && ...
+                strcmp(target.Enable, 'on')
+            focus(target);
+        end
     end
 
     function editFile(field)
@@ -184,6 +194,7 @@ function fig = autosarMappingGui(model, opts)
 
     function loadSelectedModel(~, ~)
         if isBusy(), return; end
+        restoreFocus = onCleanup(@() refocus(loadModel));
         [name, folder] = uigetfile({'*.slx;*.mdl', 'Simulink models'});
         if isequal(name, 0), return; end
         beginOperation('Loading model...');
@@ -201,6 +212,7 @@ function fig = autosarMappingGui(model, opts)
 
     function exportCsv(~, ~)
         if isBusy(), return; end
+        restoreFocus = onCleanup(@() refocus(csv));
         [name, folder] = uiputfile('*.csv', 'Export to a new CSV file');
         if isequal(name, 0), return; end
         beginOperation('Exporting native Code Mapping settings...');

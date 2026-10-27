@@ -11,6 +11,8 @@
   changed data attributes when a mapping role stays the same.
 - Omit inactive NvBlockNeeds fields from exports and ignore them in older CSVs
   when NeedsNVRAMAccess is false, including Auto-to-PIM remapping.
+- Return focus to the AUTOSAR mapping GUI after file selection dialogs close
+  on MATLAB R2024a.
 
 ### 1.2.0 - 2026-10-26
 
