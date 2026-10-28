@@ -9,7 +9,78 @@ function testSignalNaming()
     local_testTraceBoundaries();
     local_testInBusPropagation();
     local_testGotoVisibility();
+    local_testPreviewOrdering();
     fprintf('PASS: CLI/GUI function elements/callers, trace boundaries, In Bus labels, read-only Preview, no autosave.\n');
+end
+
+function local_testPreviewOrdering()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    cleanup = onCleanup(@() close_system(model, 0));
+    names = {'AKeep', 'BChange', 'CKeep', 'DChange'};
+    lines = zeros(1, numel(names));
+    for k = 1:numel(names)
+        add_block('simulink/Ports & Subsystems/In Bus Element', [model '/' names{k}], ...
+            'PortName', ['Bus' names{k}], 'Element', names{k});
+        sink = [names{k} 'Sink'];
+        add_block('built-in/Terminator', [model '/' sink]);
+        lines(k) = add_line(model, [names{k} '/1'], [sink '/1']);
+        if mod(k, 2) == 1, set_param(lines(k), 'Name', names{k}); end
+    end
+    add_block('simulink/Ports & Subsystems/Function Element Call', [model '/ESkipped'], 'Element', 'ESkipped');
+    add_block('built-in/Constant', [model '/Source']);
+    add_block('built-in/Goto', [model '/Goto'], 'GotoTag', 'PropagationTag');
+    add_block('built-in/From', [model '/From'], 'GotoTag', 'PropagationTag');
+    add_block('built-in/Goto', [model '/TraceGoto'], 'GotoTag', 'TraceTag');
+    add_block('built-in/From', [model '/TraceFrom'], 'GotoTag', 'TraceTag');
+    add_block('simulink/Ports & Subsystems/Out Bus Element', [model '/Out'], ...
+        'PortName', 'ResultBus', 'Element', 'Result.Prop');
+    sourceLine = add_line(model, 'Source/1', 'Goto/1');
+    traceLine = add_line(model, 'From/1', 'TraceGoto/1');
+    outputLine = add_line(model, 'TraceFrom/1', 'Out/1');
+    set_param(sourceLine, 'Name', 'Result_Prop');
+    set_param(get_param(outputLine, 'SrcPortHandle'), 'ShowPropagatedSignals', 'off');
+    set_param(model, 'Dirty', 'off');
+    opts = struct('dryRun', true, 'verbose', true);
+    [console, report] = evalc('nameBusElementSignals(model, opts)');
+    expected = strcat([model '/'], {'BChange', 'DChange', 'Out', 'ESkipped', 'AKeep', 'CKeep'});
+    assert(isequal({report.block}, expected));
+    assert(startsWith(report(3).status, 'ok:') && strcmp(report(3).propagated, 'dry-run'));
+    positions = cellfun(@(name) regexp(console, name, 'once'), {'BChange', 'ESkipped', 'AKeep'});
+    assert(issorted(positions));
+    assert(strcmp(get_param(model, 'Dirty'), 'off'));
+    assert(isempty(get_param(lines(2), 'Name')) && strcmp(local_propagated(outputLine), 'off'));
+
+    fig = nameBusElementSignalsGui(model, opts);
+    figCleanup = onCleanup(@() delete(fig));
+    button = findall(fig, 'Tag', 'Preview');
+    button.ButtonPushedFcn(button, []);
+    assert(isempty(fig.UserData.Error) && isequal(fig.UserData.Report, report));
+    results = findall(fig, 'Tag', 'NamingResults');
+    assert(isequal(results.Data(:, 6)', expected));
+    assert(strcmp(get_param(model, 'Dirty'), 'off'));
+    button = findall(fig, 'Tag', 'Apply');
+    button.ButtonPushedFcn(button, []);
+    assert(isempty(fig.UserData.Error) && isequal({fig.UserData.Report.block}, expected));
+    assert(strcmp(local_propagated(outputLine), 'on'));
+    button = findall(fig, 'Tag', 'Preview');
+    button.ButtonPushedFcn(button, []);
+    unchangedOrder = strcat([model '/'], {'ESkipped', 'AKeep', 'BChange', 'CKeep', 'DChange', 'Out'});
+    assert(isequal({fig.UserData.Report.block}, unchangedOrder));
+    assert(all(startsWith({fig.UserData.Report(2:end).status}, 'ok:')));
+
+    % Propagation changes on intermediate trace lines also lead the report.
+    opts.propagateTracePath = true;
+    opts.verbose = false;
+    set_param(get_param(traceLine, 'SrcPortHandle'), 'ShowPropagatedSignals', 'off');
+    set_param(model, 'Dirty', 'off');
+    report = nameBusElementSignals(model, opts);
+    assert(strcmp(report(1).block, [model '/Out']));
+    assert(startsWith(report(1).status, 'ok:') && strcmp(report(1).propagated, 'on(already)'));
+    assert(strcmp(get_param(model, 'Dirty'), 'off') && strcmp(local_propagated(traceLine), 'off'));
+    opts.dryRun = false;
+    report = nameBusElementSignals(model, opts);
+    assert(strcmp(report(1).block, [model '/Out']) && strcmp(local_propagated(traceLine), 'on'));
 end
 
 function local_testFunctionElements()

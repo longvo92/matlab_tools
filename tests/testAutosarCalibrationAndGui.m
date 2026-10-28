@@ -82,6 +82,11 @@ function testAutosarCalibrationAndGui(screenshotFile)
     rows = keepAuto.Elements.Element == "Cal_Speed";
     assert(sum(rows) == 1 && keepAuto.Elements.Desired(rows) == "Auto");
 
+    unchangedRule = rules(1, :);
+    unchangedRule.Element = "Cal_Existing";
+    unchangedRule.Property = "MappedTo";
+    unchangedRule.Value = "ConstantMemory";
+    writetable([rules; unchangedRule], csv);
     fig = autosarMappingGui(model, struct('Source', csv, 'CalibrationConfig', filename, 'Visible', 'off'));
     closeGui = onCleanup(@() delete(fig));
     previewButton = findall(fig, 'Tag', 'AutosarMappingPreview');
@@ -94,6 +99,10 @@ function testAutosarCalibrationAndGui(screenshotFile)
     assert(isempty(fig.UserData.LastError) && ~fig.UserData.Busy);
     assert(isequal(guiPreview.Elements, configureAutosarMapping(model, csv, options).Elements));
     assert(strcmp(applyButton.Enable, 'on') && size(results.Data, 1) == height(guiPreview.Elements));
+    assert(isequal(results.Data, cellstr(guiPreview.Elements{:,:})));
+    assert(any(guiPreview.Elements.Status == "Change") && any(guiPreview.Elements.Status == "Unchanged"));
+    assert(all(guiPreview.Elements.Status(1:guiPreview.Changed) == "Change"));
+    assert(all(guiPreview.Elements.Status(guiPreview.Changed + 1:end) == "Unchanged"));
     config.IgnoreCase = true;
     local_json(filename, config);
     local_click(applyButton);
@@ -132,7 +141,33 @@ function testAutosarCalibrationAndGui(screenshotFile)
     assert(isempty(fig.UserData.Report) && strcmp(applyButton.Enable, 'off'));
     local_click(previewButton);
     assert(fig.UserData.Report.Model == string(second) && height(fig.UserData.Report.CalibrationMatches) == 3);
+    local_constantMemoryCalibrationGui(second, sandbox);
     fprintf('PASS: global calibration regexp, include/exclude/case, model isolation, overrides, CLI/GUI, stale model/CSV/JSON rejection, no-save.\n');
+end
+
+function local_constantMemoryCalibrationGui(model, sandbox)
+    properties = autosar.api.getAUTOSARProperties(model);
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'CALIB_8BIT', 'SectionType', 'Calprm');
+    rules = table(string(model), "ModelParameters", "Cal_Existing", "SwAddrMethod", "CALIB_8BIT", ...
+        'VariableNames', {'Model', 'Category', 'Element', 'Property', 'Value'});
+    filename = fullfile(sandbox, 'constant_calibration.csv');
+    writetable(rules, filename);
+    fig = autosarMappingGui(model, struct('Source', filename, 'CalibrationConfig', '', 'Visible', 'off'));
+    closeGui = onCleanup(@() delete(fig));
+    previewButton = findall(fig, 'Tag', 'AutosarMappingPreview');
+    applyButton = findall(fig, 'Tag', 'AutosarMappingApply');
+    before = exportAutosarMapping(model);
+    local_click(previewButton);
+    assert(isempty(fig.UserData.LastError) && fig.UserData.Report.Changed == 1);
+    assert(isequal(before, exportAutosarMapping(model)));
+    local_click(applyButton);
+    assert(isempty(fig.UserData.LastError) && fig.UserData.Report.Applied == 1);
+    mapping = autosar.api.getSimulinkMapping(model);
+    assert(strcmp(mapping.getParameter('Cal_Existing'), 'ConstantMemory'));
+    assert(strcmp(mapping.getParameter('Cal_Existing', 'SwAddrMethod'), 'CALIB_8BIT'));
+    local_click(previewButton);
+    assert(isempty(fig.UserData.LastError) && fig.UserData.Report.Compliant);
+    assert(strcmp(applyButton.Enable, 'off'));
 end
 
 function local_fixture(model)

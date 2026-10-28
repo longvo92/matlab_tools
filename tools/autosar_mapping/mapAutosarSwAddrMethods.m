@@ -1,5 +1,5 @@
 function report = mapAutosarSwAddrMethods(model, source, opts)
-%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.3.0).
+%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.3.3).
 %   REPORT = mapAutosarSwAddrMethods(MODEL, CSVFILE) previews all existing
 %   explicit AUTOSAR mappings covered by the model's rules. Pass [] as MODEL
 %   to use the current model. MODEL must already be loaded. SOURCE can also
@@ -18,7 +18,8 @@ function report = mapAutosarSwAddrMethods(model, source, opts)
 %   Initialize/terminate/reset entry points have no configurable internal-data
 %   SwAddrMethod; their RunnableInternalData rows are explicitly ignored.
 %
-%   SwAddrMethods must already exist with unique SHORT-NAMEs. Preflight
+%   SwAddrMethods must already exist with unique SHORT-NAMEs. ConstantMemory
+%   accepts Const or Calprm methods without changing its memory role. Preflight
 %   checks all selected rules and snapshots before any write. Runnable
 %   internal data requires GroupInternalDataByFunction='on'. Failed writes
 %   attempt to restore every attempted SwAddrMethod and the original dirty
@@ -27,6 +28,8 @@ function report = mapAutosarSwAddrMethods(model, source, opts)
 %   REPORT.Elements lists Category, Element, Type, Current, Desired, Status,
 %   and Reason. Current is the pre-apply value. Status is Change, Unchanged,
 %   Applied, Ignored, or Unconfigured. REPORT.Rules includes Matched counts.
+%   Changes appear first, ignored/unconfigured rows next, unchanged rows last;
+%   the original order is preserved within each group.
 %   REPORT.Compliant requires every rule to match at least one element and
 %   every configured element to have the desired value. Auto is excluded.
 %
@@ -111,6 +114,7 @@ function report = mapAutosarSwAddrMethods(model, source, opts)
             @(k, value) local_write(mapping, operations(k), value));
         elements.Status(changed) = "Applied";
     end
+    elements = autosarMapping.sortReportElements(elements);
     report = struct('Model', string(model), 'Mode', string(mode), 'Rules', selected, ...
         'Elements', elements, 'Changed', numel(changed), 'Applied', 0, ...
         'Compliant', ~any(elements.Status == "Change") && all(matched > 0));
@@ -138,9 +142,7 @@ function local_validateMethods(properties, rules)
                 allowed = "Code";
             case "RunnableInternalData"
                 allowed = "Var";
-            case "ConstantMemory"
-                allowed = "Const";
-            case "SharedParameter"
+            case {"ConstantMemory", "SharedParameter"}
                 allowed = ["Const", "Calprm"];
             otherwise
                 allowed = "Var";

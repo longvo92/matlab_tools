@@ -1,5 +1,5 @@
 function report = configureAutosarMapping(model, source, opts)
-%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.0).
+%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.3).
 %   REPORT = configureAutosarMapping(MODEL, CSVFILE) previews property rules
 %   with columns Model,Category,Element,Property,Value. This single CSV also
 %   manages SwAddrMethod. SOURCE can be a table.
@@ -16,8 +16,9 @@ function report = configureAutosarMapping(model, source, opts)
 %   changed model/config inputs before applying (used by autosarMappingGui).
 %   All changes to one element are written together so coupled properties
 %   (port/data element, memory type/attributes) never depend on CSV row order.
-%   Defaults are applied before element mappings. Failure restores attempted
-%   changed settings and registration if a native setter fails.
+%   Apply orders defaults and function writes by the final grouping mode:
+%   runnable methods are cleared before disabling grouping. Failure restores
+%   attempted changed settings and registration if a native setter fails.
 %
 %   Categories: Inports, Outports, Functions, FunctionCallers, DataTransfers,
 %   ModelParameters, ModelParameterArguments, Signals, States, DataStores,
@@ -25,12 +26,16 @@ function report = configureAutosarMapping(model, source, opts)
 %   '*' for a category, or 'type:StaticMemory' (or another current memory type).
 %   'type?:StaticMemory' skips a missing type and reports it in SkippedRules.
 %   Conflicting/overlapping rules and unmatched strict selectors are errors.
+%   Report rows list changes first, ignored settings next, unchanged rows last.
+%   Order within each group is preserved; snapshots retain native plan order.
 %
 %   CSV properties include DataAccessMode (implicit/explicit/queued/E2E),
 %   Port, DataElement, Runnable, Operation, InterRunnableVariable, MappedTo,
 %   SwAddrMethod and native data attributes. Defaults use InternalData or
 %   InportsOutports. Registered=true/false explicitly adds/removes Signals
 %   or SynthesizedDataStores. Empty Value explicitly clears an attribute.
+%   ConstantMemory parameters accept Const or Calprm SwAddrMethods without
+%   changing the parameter's memory role.
 %   Unknown settings are errors. No config values are evaluated as MATLAB.
 %   RestoreAtStart/StoreAtShutdown are ignored when NeedsNVRAMAccess=false;
 %   they are inactive native attributes and appear as Ignored in the report.
@@ -199,18 +204,24 @@ function report = configureAutosarMapping(model, source, opts)
         error('AutosarMapping:StalePreview', 'Model or configuration changed after preview. Run Preview again.');
     end
     if strcmp(mode, 'apply') && changed > 0
-        priority = arrayfun(@(t) t.Record.Category ~= "Defaults", tasks);
+        priority = double(arrayfun(@(t) t.Record.Category ~= "Defaults", tasks));
+        if grouping == "off"
+            % Clear runnable methods while grouping is still enabled, before
+            % applying defaults that disable access to those native fields.
+            priority(arrayfun(@(t) t.Record.Category == "Functions", tasks)) = -1;
+        end
         [~, order] = sort(priority);
         autosarMapping.applyCodeMapping(adapter, tasks(order));
         plan.Status(plan.Status == "Change") = "Applied";
     end
-    report = struct('Model', adapter.Model, 'Mode', string(mode), 'Elements', plan, ...
+    elements = autosarMapping.sortReportElements(plan);
+    report = struct('Model', adapter.Model, 'Mode', string(mode), 'Elements', elements, ...
         'Changed', changed, 'Applied', sum(plan.Status == "Applied"), ...
         'Compliant', ~any(plan.Status == "Change"), 'CalibrationConfig', config.File, ...
         'CalibrationMatches', calibration, 'SkippedRules', skippedRules, 'Snapshot', snapshot);
     if nargout == 0
         fprintf('AUTOSAR Code Mappings [%s] %s: %d changes, %d applied.\n', ...
             mode, adapter.Model, changed, report.Applied);
-        disp(plan);
+        disp(report.Elements);
     end
 end

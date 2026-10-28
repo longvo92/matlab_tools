@@ -1,11 +1,12 @@
 function fig = autosarMappingGui(model, opts)
-%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.3.0).
+%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.3.3).
 %   autosarMappingGui opens a simple GUI for a loaded AUTOSAR Classic model.
 %   autosarMappingGui(MODEL, OPTS) optionally sets Source (model CSV),
 %   CalibrationConfig (global JSON, '' disables), and Visible ('on'/'off').
 %   Empty Source runs global calibration rules only. The global JSON is shared
 %   with configureAutosarMapping. Export CSV writes a new settings file.
 %   Apply preview checks that model/config inputs still match the preview.
+%   Results list changes first and unchanged rows last, matching CLI reports.
 %   Changes stay in memory; save the model explicitly in Simulink.
 %   Requires MATLAB/Simulink R2024a+, AUTOSAR Blockset. Copy the full bundle.
     if nargin < 1, model = []; end
@@ -29,7 +30,7 @@ function fig = autosarMappingGui(model, opts)
         if ~isequal(current, 0) && ~isempty(current), selected = get_param(current, 'Name'); end
     end
     preview = [];
-    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.3.0', 'Tag', 'AutosarMappingGui', ...
+    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.3.3', 'Tag', 'AutosarMappingGui', ...
         'Position', [180 150 1080 650], 'Visible', 'off', 'CloseRequestFcn', @closeWindow);
     grid = uigridlayout(fig, [6 1], 'RowHeight', {32, 32, 32, 34, '1x', 62}, ...
         'Padding', [12 12 12 12]);

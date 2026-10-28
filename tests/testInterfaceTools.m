@@ -63,6 +63,8 @@ function testInterfaceTools(scope)
     [console, summary] = evalc('sync_bus_interfaces_from_excel(''source.xlsx'', dictionary, ''ModelA'', ''export.xlsx'', ''preview'')');
     assert(summary.ToAdd == 35 && summary.ToRemove == 1 && summary.MetadataMismatch == 25);
     assert(height(summary.Changes) == 61 && ~summary.Saved);
+    assert(all(ismember(summary.Changes.Action, {'ADD', 'REMOVE', 'PROPERTY_DIFF'})), ...
+        'Interface previews must contain differences only.');
     add = summary.Changes(strcmp(summary.Changes.Interface, 'BusA.New01'), :);
     removed = summary.Changes(strcmp(summary.Changes.Interface, 'BusA.Old'), :);
     assert(strcmp(add.Property{1}, 'element') && contains(add.SourceValue{1}, 'DataType=double'));
@@ -85,6 +87,7 @@ function testInterfaceTools(scope)
     button.ButtonPushedFcn(button, []);
     details = findall(fig, 'Tag', 'InterfaceDifferences');
     assert(size(details.Data, 1) == 61);
+    assert(isequal(details.Data(:, 2:end), table2cell(summary.Changes)));
     drawnow;
     assert(isequal(sheets.Layout.Column, [1 2]) && sheets.Position(3) > 500 && sheets.Position(4) > 130);
     selectChanges = findall(fig, 'Tag', 'SelectChanges');

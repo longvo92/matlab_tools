@@ -4,6 +4,7 @@ function testAutosarMapping()
     restorePath = onCleanup(@() path(previousPath));
     repo = fileparts(fileparts(mfilename('fullpath')));
     addpath(fullfile(repo, 'tools', 'autosar_mapping'));
+    local_reportOrdering();
     sandbox = tempname;
     mkdir(sandbox);
     removeSandbox = onCleanup(@() rmdir(sandbox, 's'));
@@ -33,6 +34,7 @@ function testAutosarMapping()
     local_configErrors(rules, sandbox);
 
     saved = fullfile(sandbox, [model '.slx']);
+    mapping.mapParameter('C', 'ConstantMemory', 'SwAddrMethod', 'AppConst');
     save_system(model, saved);
     fileBefore = local_bytes(saved);
     before = local_snapshot(mapping);
@@ -40,6 +42,8 @@ function testAutosarMapping()
     assert(~preview.Compliant && preview.Changed >= 9 && preview.Applied == 0);
     assert(all(preview.Rules.Matched > 0));
     assert(any(preview.Elements.Status == "Ignored"));
+    assert(any(preview.Elements.Status == "Unchanged"));
+    local_assertOrder(preview.Elements);
     assert(strcmp(get_param(model, 'Dirty'), 'off'));
     assert(isequal(before, local_snapshot(mapping)));
     local_preflightErrors(model, rules, mapping, before);
@@ -47,6 +51,7 @@ function testAutosarMapping()
     result = mapAutosarSwAddrMethods(model, config, struct('Mode', 'apply'));
     assert(result.Compliant && result.Applied == preview.Changed);
     assert(all(result.Elements.Status ~= "Change"));
+    local_assertOrder(result.Elements);
     assert(strcmp(get_param(model, 'Dirty'), 'on'));
     assert(isequal(fileBefore, local_bytes(saved)), 'Apply must not save the model.');
     after = local_snapshot(mapping);
@@ -61,6 +66,7 @@ function testAutosarMapping()
     subset = rules(rules.Type == "Runnable", :);
     limited = mapAutosarSwAddrMethods(model, subset);
     assert(limited.Compliant && any(limited.Elements.Status == "Unconfigured"));
+    local_assertOrder(limited.Elements);
     byHandle = mapAutosarSwAddrMethods(get_param(model, 'Handle'), subset);
     assert(isequal(byHandle.Elements, limited.Elements));
     assert(isequal(after, local_snapshot(mapping)));
@@ -83,7 +89,48 @@ function testAutosarMapping()
     assert(secondResult.Compliant && height(secondResult.Rules) == 1);
     assert(isequal(after, local_snapshot(mapping)));
     local_transactionTests(second);
+    local_constantMemoryCalibration(model);
     fprintf('PASS: CSV validation, native mapping coverage, preflight, isolation, preservation, idempotence, no-save, rollback.\n');
+end
+
+function local_constantMemoryCalibration(model)
+    mapping = autosar.api.getSimulinkMapping(model);
+    before = local_snapshot(mapping);
+    rules = table(string(model), "ConstantMemory", "AppCal", ...
+        'VariableNames', {'Model', 'Type', 'SwAddrMethod'});
+    preview = mapAutosarSwAddrMethods(model, rules);
+    assert(preview.Changed == 1 && preview.Applied == 0 && isequal(before, local_snapshot(mapping)));
+    result = mapAutosarSwAddrMethods(model, rules, struct('Mode', 'apply'));
+    assert(result.Compliant && result.Applied == 1);
+    assert(strcmp(mapping.getParameter('C'), 'ConstantMemory'));
+    assert(strcmp(mapping.getParameter('C', 'SwAddrMethod'), 'AppCal'));
+    after = local_snapshot(mapping);
+    assert(isequal(before.Preserved, after.Preserved));
+    assert(mapAutosarSwAddrMethods(model, rules, struct('Mode', 'apply')).Applied == 0);
+    for method = ["AppCode", "AppVar"]
+        bad = rules;
+        bad.SwAddrMethod = method;
+        local_expectError(@() mapAutosarSwAddrMethods(model, bad, struct('Mode', 'apply')), ...
+            'AutosarMapping:SectionType');
+        assert(isequal(after, local_snapshot(mapping)), 'Invalid section changed native mappings.');
+    end
+end
+
+function local_reportOrdering()
+    elements = table((1:8)', ["Unchanged"; "Ignored"; "Change"; "Unchanged"; ...
+        "Applied"; "Unconfigured"; "Change"; "Ignored"], 'VariableNames', {'Id', 'Status'});
+    sorted = autosarMapping.sortReportElements(elements);
+    assert(isequal(sorted.Id, [3; 5; 7; 2; 6; 8; 1; 4]));
+    assert(isequal(sorted, autosarMapping.sortReportElements(sorted)));
+    assert(isequal(elements([], :), autosarMapping.sortReportElements(elements([], :))));
+end
+
+function local_assertOrder(elements)
+    changed = ismember(elements.Status, ["Change", "Applied"]);
+    priority = ones(height(elements), 1);
+    priority(changed) = 0;
+    priority(elements.Status == "Unchanged") = 2;
+    assert(issorted(priority), 'Changes must appear first and unchanged rows last.');
 end
 
 function local_transactionTests(model)

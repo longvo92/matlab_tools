@@ -76,10 +76,20 @@ function testAutosarCodeMapping()
         ["ReadWrite"; "true"; "%3.5f"; "true"; "true"; "false"; "false"; "Delay state"; ...
         "PerInstanceParameter"; "VAR"; "Client2"; "PrivateGlobal"; "on"; "TransformerError"; "CODE"; "VAR"]);
     before = exportAutosarMapping(model);
+    currentPort = before.Value(before.Category == "Inports" & before.Element == "Input" & before.Property == "Port");
+    changes = [changes; local_rules(model, "Inports", "Input", "Port", currentPort)];
     preview = configureAutosarMapping(model, changes);
     assert(preview.Changed > 10 && preview.Applied == 0 && isequal(before, exportAutosarMapping(model)));
-    applied = configureAutosarMapping(model, changes, struct('Mode', 'apply'));
+    nativePlan = preview.Snapshot.Plan;
+    changedRows = nativePlan.Status == "Change";
+    assert(any(changedRows) && any(~changedRows));
+    assert(isequal(preview.Elements, [nativePlan(changedRows, :); nativePlan(~changedRows, :)]));
+    applied = configureAutosarMapping(model, changes, ...
+        struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
     assert(applied.Compliant && applied.Applied == preview.Changed);
+    expected = preview.Elements;
+    expected.Status(expected.Status == "Change") = "Applied";
+    assert(isequal(applied.Elements, expected));
     assert(isequal(bytes, local_bytes(saved)), 'Apply must never save the model.');
     assert(string(mapping.getParameter('Arg')) == "PerInstanceParameter");
     assert(string(mapping.getDataStore([model '/Memory'], 'NeedsNVRAMAccess')) == "true");
@@ -108,7 +118,119 @@ function testAutosarCodeMapping()
     local_sharedEntityRollback();
     local_inactiveNvBlockNeeds();
     local_busPorts();
+    local_constantMemoryCalibration(model);
+    local_internalDataGrouping();
     fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, inactive NvBlockNeeds, shared-entity rollback.\n');
+end
+
+function local_internalDataGrouping()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    closeModel = onCleanup(@() close_system(model, 0));
+    set_param(model, 'SystemTargetFile', 'autosar.tlc', 'Solver', 'FixedStepDiscrete', ...
+        'FixedStep', '0.1', 'SolverMode', 'MultiTasking', 'GroupInternalDataByFunction', 'on');
+    for k = 1:2
+        name = sprintf('Rate%d', k);
+        add_block('built-in/Inport', [model '/' name], 'SampleTime', num2str(k / 10));
+        add_block('simulink/Discrete/Unit Delay', [model '/' name 'Delay']);
+        add_block('built-in/Outport', [model '/' name 'Out']);
+        add_line(model, [name '/1'], [name 'Delay/1']);
+        add_line(model, [name 'Delay/1'], [name 'Out/1']);
+    end
+    autosar.api.create(model, 'default');
+    autosar.api.syncModel(model);
+    mapping = autosar.api.getSimulinkMapping(model);
+    properties = autosar.api.getAUTOSARProperties(model);
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'GroupVar', 'SectionType', 'Var');
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'GroupCode', 'SectionType', 'Code');
+    mapping.setInternalDataPackaging('PrivateGlobal');
+    functions = string(mapping.find('Functions'));
+    functions = functions(startsWith(functions, 'Periodic'));
+    assert(numel(functions) == 2, 'Expected rate runnables, got: %s', strjoin(functions, ', '));
+    for name = functions(:)'
+        runnable = mapping.getFunction(char(name));
+        mapping.mapFunction(char(name), runnable, 'SwAddrMethod', 'GroupCode', ...
+            'SwAddrMethodForInternalData', 'GroupVar');
+    end
+    baseline = exportAutosarMapping(model);
+    disable = local_rules(model, ["Defaults"; "Defaults"], ["InternalData"; "InternalData"], ...
+        ["GroupInternalDataByFunction"; "Packaging"], ["off"; "Default"]);
+    for name = functions(:)'
+        disable = [disable; local_rules(model, ["Functions"; "Functions"], [name; name], ...
+            ["SwAddrMethod"; "SwAddrMethodForInternalData"], [""; ""])]; %#ok<AGROW>
+    end
+    preview = configureAutosarMapping(model, disable);
+    assert(isequal(baseline, exportAutosarMapping(model)));
+    applied = configureAutosarMapping(model, disable, struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
+    assert(applied.Compliant && applied.Applied == preview.Changed);
+    local_assertInternalMethods(mapping, functions, "");
+    assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), 'off'));
+    assert(strcmp(mapping.getInternalDataPackaging(), 'Default'));
+    assert(configureAutosarMapping(model, disable, struct('Mode', 'apply')).Applied == 0);
+
+    % Restoring an enabled baseline applies defaults before function setters.
+    local_apply(model, baseline);
+    assert(isequal(baseline, exportAutosarMapping(model)));
+    groupOff = disable(1, :);
+    local_apply(model, groupOff);
+    local_assertInternalMethods(mapping, functions, "GroupVar");
+    inactive = exportAutosarMapping(model);
+    assert(~any(inactive.Category == "Functions" & inactive.Property == "SwAddrMethodForInternalData"));
+    assert(configureAutosarMapping(model, inactive, struct('Mode', 'apply')).Applied == 0);
+
+    % Clear latent values while grouping is already off, without leaving it on.
+    local_apply(model, disable);
+    local_assertInternalMethods(mapping, functions, "");
+    assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), 'off'));
+
+    badPort = local_rules(model, "Outports", "Rate1Out", "Port", "MissingPort");
+    for grouping = ["on", "off"]
+        local_apply(model, baseline);
+        if grouping == "off", local_apply(model, groupOff); end
+        before = exportAutosarMapping(model);
+        set_param(model, 'Dirty', 'off');
+        failure = local_error(@() configureAutosarMapping(model, [disable; badPort], struct('Mode', 'apply')), ...
+            'AutosarMapping:ApplyFailed');
+        assert(isscalar(failure.cause), 'Native grouping rollback must succeed.');
+        assert(isequal(before, exportAutosarMapping(model)));
+        assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), grouping));
+        assert(strcmp(get_param(model, 'Dirty'), 'off'));
+        local_assertInternalMethods(mapping, functions, "GroupVar");
+    end
+    fprintf('PASS: D1/D2 grouping transitions, explicit/latent clears, inactive export, rollback and dirty preservation.\n');
+end
+
+function local_assertInternalMethods(mapping, functions, expected)
+    for name = functions(:)'
+        [~, ~, method] = mapping.getFunction(char(name));
+        if strcmp(method, '<None>'), method = ''; end
+        assert(strcmp(method, expected));
+    end
+end
+
+function local_constantMemoryCalibration(model)
+    properties = autosar.api.getAUTOSARProperties(model);
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'CALIB_8BIT', 'SectionType', 'Calprm');
+    mapping = autosar.api.getSimulinkMapping(model);
+    rules = local_rules(model, repmat("ModelParameters", 3, 1), repmat("C", 3, 1), ...
+        ["MappedTo"; "SwAddrMethod"; "IsConst"], ["ConstantMemory"; "CALIB_8BIT"; "false"]);
+    before = exportAutosarMapping(model);
+    preview = configureAutosarMapping(model, rules);
+    assert(preview.Changed > 0 && preview.Applied == 0 && isequal(before, exportAutosarMapping(model)));
+    result = configureAutosarMapping(model, rules, struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
+    assert(result.Compliant && result.Applied == preview.Changed);
+    assert(strcmp(mapping.getParameter('C'), 'ConstantMemory'));
+    assert(strcmp(mapping.getParameter('C', 'SwAddrMethod'), 'CALIB_8BIT'));
+    assert(strcmp(mapping.getParameter('C', 'IsConst'), 'false'));
+    exported = exportAutosarMapping(model);
+    current = exported(exported.Category == "ModelParameters" & exported.Element == "C", :);
+    roundtrip = configureAutosarMapping(model, current, struct('Mode', 'apply'));
+    assert(roundtrip.Compliant && roundtrip.Applied == 0);
+    for method = ["CODE", "VAR"]
+        bad = local_rules(model, "ModelParameters", "C", "SwAddrMethod", method);
+        local_error(@() configureAutosarMapping(model, bad, struct('Mode', 'apply')), 'AutosarMapping:SectionType');
+        assert(isequal(exported, exportAutosarMapping(model)), 'Invalid section changed native mappings.');
+    end
 end
 
 function local_fixture(model)
@@ -326,6 +448,9 @@ function local_inactiveNvBlockNeeds()
     ignored = preview.Elements(preview.Elements.Status == "Ignored", :);
     assert(height(ignored) == 2 && ...
         all(ismember(ignored.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+    nativePlan = preview.Snapshot.Plan;
+    assert(isequal(preview.Elements, [nativePlan(nativePlan.Status == "Change", :); ...
+        nativePlan(nativePlan.Status == "Ignored", :); nativePlan(nativePlan.Status == "Unchanged", :)]));
     applied = configureAutosarMapping(model, legacy, struct('Mode', 'apply'));
     assert(applied.Compliant && strcmp(mapping.getDataStore(block), 'ArTypedPerInstanceMemory'));
     assert(strcmp(mapping.getDataStore(block, 'NeedsNVRAMAccess'), 'false'));

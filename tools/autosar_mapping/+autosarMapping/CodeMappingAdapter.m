@@ -1,5 +1,5 @@
 classdef CodeMappingAdapter
-%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.3.0).
+%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.3.3).
 %   Internal bundle implementation. Uses documented mapping methods only;
 %   unavailable properties are not exported and cannot silently be ignored.
     properties (SetAccess = private)
@@ -205,8 +205,21 @@ classdef CodeMappingAdapter
                     mapping.mapOutport(t, char(values.Port), char(values.DataElement), char(values.DataAccessMode));
                 case "Functions"
                     args = {'SwAddrMethod', local_nativeMethod(values.SwAddrMethod)};
-                    if isfield(values, 'SwAddrMethodForInternalData') && ...
-                            strcmp(get_param(char(obj.Model), 'GroupInternalDataByFunction'), 'on')
+                    runnableChanged = ~isfield(previous, 'Runnable') || previous.Runnable ~= values.Runnable;
+                    writeInternal = isfield(values, 'SwAddrMethodForInternalData') && ...
+                        (runnableChanged || ~isfield(previous, 'SwAddrMethodForInternalData') || ...
+                        previous.SwAddrMethodForInternalData ~= values.SwAddrMethodForInternalData);
+                    if writeInternal
+                        model = char(obj.Model);
+                        grouping = get_param(model, 'GroupInternalDataByFunction');
+                        if strcmp(grouping, 'off')
+                            % Native getters retain latent methods with grouping
+                            % off. Temporarily enable their setter for explicit
+                            % clears and rollback, then restore the original flag.
+                            set_param(model, 'GroupInternalDataByFunction', 'on');
+                            restoreGrouping = onCleanup(@() set_param(model, ...
+                                'GroupInternalDataByFunction', grouping));
+                        end
                         args = [args, {'SwAddrMethodForInternalData', local_nativeMethod(values.SwAddrMethodForInternalData)}];
                     end
                     mapping.mapFunction(t, char(values.Runnable), args{:});
