@@ -1,5 +1,5 @@
 function after = prepareCodeMapping(adapter, record, before, edited)
-%PREPARECODEMAPPING Validate scalar rules and assemble native tuple (v1.3.1).
+%PREPARECODEMAPPING Validate scalar rules and assemble native tuple (v1.3.2).
     after = before;
     for name = string(fieldnames(edited))'
         after.(char(name)) = edited.(char(name));
@@ -72,8 +72,9 @@ function after = prepareCodeMapping(adapter, record, before, edited)
             allowed = "Var";
             if record.Category == "Functions" && name == "SwAddrMethod", allowed = "Code"; end
             if isfield(after, 'MappedTo')
-                if after.MappedTo == "ConstantMemory", allowed = "Const"; end
-                if any(after.MappedTo == ["SharedParameter", "PerInstanceParameter", "PortParameter"])
+                % ConstantMemory also supports calibration sections in native
+                % AUTOSAR mapping and code generation; keep its memory role.
+                if any(after.MappedTo == ["ConstantMemory", "SharedParameter", "PerInstanceParameter", "PortParameter"])
                     allowed = ["Const", "Calprm"];
                 end
             end

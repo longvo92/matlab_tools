@@ -1,5 +1,5 @@
 function report = configureAutosarMapping(model, source, opts)
-%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.1).
+%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.2).
 %   REPORT = configureAutosarMapping(MODEL, CSVFILE) previews property rules
 %   with columns Model,Category,Element,Property,Value. This single CSV also
 %   manages SwAddrMethod. SOURCE can be a table.
@@ -33,6 +33,8 @@ function report = configureAutosarMapping(model, source, opts)
 %   SwAddrMethod and native data attributes. Defaults use InternalData or
 %   InportsOutports. Registered=true/false explicitly adds/removes Signals
 %   or SynthesizedDataStores. Empty Value explicitly clears an attribute.
+%   ConstantMemory parameters accept Const or Calprm SwAddrMethods without
+%   changing the parameter's memory role.
 %   Unknown settings are errors. No config values are evaluated as MATLAB.
 %   RestoreAtStart/StoreAtShutdown are ignored when NeedsNVRAMAccess=false;
 %   they are inactive native attributes and appear as Ignored in the report.

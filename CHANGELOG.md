@@ -2,6 +2,12 @@
 
 ## AUTOSAR Code Mappings
 
+### 1.3.2 - 2026-10-28
+
+- Accept `Calprm` SwAddrMethods for `ConstantMemory` parameters in CLI/GUI and
+  the legacy CSV API, preserving the memory role and parameter qualifiers.
+  Continue rejecting incompatible code and variable sections.
+
 ### 1.3.1 - 2026-10-28
 
 - List changes before ignored/unconfigured and unchanged rows in CLI/GUI

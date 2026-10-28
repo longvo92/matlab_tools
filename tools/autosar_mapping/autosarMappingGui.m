@@ -1,5 +1,5 @@
 function fig = autosarMappingGui(model, opts)
-%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.3.1).
+%AUTOSARMAPPINGGUI Preview/apply AUTOSAR Code Mappings (version 1.3.2).
 %   autosarMappingGui opens a simple GUI for a loaded AUTOSAR Classic model.
 %   autosarMappingGui(MODEL, OPTS) optionally sets Source (model CSV),
 %   CalibrationConfig (global JSON, '' disables), and Visible ('on'/'off').
@@ -30,7 +30,7 @@ function fig = autosarMappingGui(model, opts)
         if ~isequal(current, 0) && ~isempty(current), selected = get_param(current, 'Name'); end
     end
     preview = [];
-    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.3.1', 'Tag', 'AutosarMappingGui', ...
+    fig = uifigure('Name', 'AUTOSAR Code Mappings v1.3.2', 'Tag', 'AutosarMappingGui', ...
         'Position', [180 150 1080 650], 'Visible', 'off', 'CloseRequestFcn', @closeWindow);
     grid = uigridlayout(fig, [6 1], 'RowHeight', {32, 32, 32, 34, '1x', 62}, ...
         'Padding', [12 12 12 12]);

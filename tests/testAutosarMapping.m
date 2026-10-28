@@ -89,7 +89,31 @@ function testAutosarMapping()
     assert(secondResult.Compliant && height(secondResult.Rules) == 1);
     assert(isequal(after, local_snapshot(mapping)));
     local_transactionTests(second);
+    local_constantMemoryCalibration(model);
     fprintf('PASS: CSV validation, native mapping coverage, preflight, isolation, preservation, idempotence, no-save, rollback.\n');
+end
+
+function local_constantMemoryCalibration(model)
+    mapping = autosar.api.getSimulinkMapping(model);
+    before = local_snapshot(mapping);
+    rules = table(string(model), "ConstantMemory", "AppCal", ...
+        'VariableNames', {'Model', 'Type', 'SwAddrMethod'});
+    preview = mapAutosarSwAddrMethods(model, rules);
+    assert(preview.Changed == 1 && preview.Applied == 0 && isequal(before, local_snapshot(mapping)));
+    result = mapAutosarSwAddrMethods(model, rules, struct('Mode', 'apply'));
+    assert(result.Compliant && result.Applied == 1);
+    assert(strcmp(mapping.getParameter('C'), 'ConstantMemory'));
+    assert(strcmp(mapping.getParameter('C', 'SwAddrMethod'), 'AppCal'));
+    after = local_snapshot(mapping);
+    assert(isequal(before.Preserved, after.Preserved));
+    assert(mapAutosarSwAddrMethods(model, rules, struct('Mode', 'apply')).Applied == 0);
+    for method = ["AppCode", "AppVar"]
+        bad = rules;
+        bad.SwAddrMethod = method;
+        local_expectError(@() mapAutosarSwAddrMethods(model, bad, struct('Mode', 'apply')), ...
+            'AutosarMapping:SectionType');
+        assert(isequal(after, local_snapshot(mapping)), 'Invalid section changed native mappings.');
+    end
 end
 
 function local_reportOrdering()

@@ -118,7 +118,33 @@ function testAutosarCodeMapping()
     local_sharedEntityRollback();
     local_inactiveNvBlockNeeds();
     local_busPorts();
+    local_constantMemoryCalibration(model);
     fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, inactive NvBlockNeeds, shared-entity rollback.\n');
+end
+
+function local_constantMemoryCalibration(model)
+    properties = autosar.api.getAUTOSARProperties(model);
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'CALIB_8BIT', 'SectionType', 'Calprm');
+    mapping = autosar.api.getSimulinkMapping(model);
+    rules = local_rules(model, repmat("ModelParameters", 3, 1), repmat("C", 3, 1), ...
+        ["MappedTo"; "SwAddrMethod"; "IsConst"], ["ConstantMemory"; "CALIB_8BIT"; "false"]);
+    before = exportAutosarMapping(model);
+    preview = configureAutosarMapping(model, rules);
+    assert(preview.Changed > 0 && preview.Applied == 0 && isequal(before, exportAutosarMapping(model)));
+    result = configureAutosarMapping(model, rules, struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
+    assert(result.Compliant && result.Applied == preview.Changed);
+    assert(strcmp(mapping.getParameter('C'), 'ConstantMemory'));
+    assert(strcmp(mapping.getParameter('C', 'SwAddrMethod'), 'CALIB_8BIT'));
+    assert(strcmp(mapping.getParameter('C', 'IsConst'), 'false'));
+    exported = exportAutosarMapping(model);
+    current = exported(exported.Category == "ModelParameters" & exported.Element == "C", :);
+    roundtrip = configureAutosarMapping(model, current, struct('Mode', 'apply'));
+    assert(roundtrip.Compliant && roundtrip.Applied == 0);
+    for method = ["CODE", "VAR"]
+        bad = local_rules(model, "ModelParameters", "C", "SwAddrMethod", method);
+        local_error(@() configureAutosarMapping(model, bad, struct('Mode', 'apply')), 'AutosarMapping:SectionType');
+        assert(isequal(exported, exportAutosarMapping(model)), 'Invalid section changed native mappings.');
+    end
 end
 
 function local_fixture(model)

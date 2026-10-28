@@ -1,5 +1,5 @@
 function config = readAutosarCalibrationConfig(filename)
-%READAUTOSARCALIBRATIONCONFIG Load global calibration naming rules (v1.3.1).
+%READAUTOSARCALIBRATIONCONFIG Load global calibration naming rules (v1.3.2).
 %   CONFIG = readAutosarCalibrationConfig() loads the adjacent
 %   autosar_calibration_config.json, shared across all models and both CLI/GUI.
 %   Pass a JSON path to use another global file, or '' to disable for a call.
