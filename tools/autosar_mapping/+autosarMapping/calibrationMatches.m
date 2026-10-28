@@ -1,5 +1,5 @@
 function matches = calibrationMatches(records, config)
-%CALIBRATIONMATCHES Classify parameter names using global regexp (v1.3.2).
+%CALIBRATIONMATCHES Classify parameter names using global regexp (v1.3.3).
     matches = array2table(strings(0, 3), 'VariableNames', {'Category', 'Element', 'Pattern'});
     if ~config.Enabled || isempty(config.IncludePatterns), return; end
     for k = 1:numel(records)

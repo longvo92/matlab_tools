@@ -1,5 +1,5 @@
 function rules = exportAutosarMapping(model, filename)
-%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.3.2).
+%EXPORTAUTOSARMAPPING Export readable AUTOSAR Code Mappings (version 1.3.3).
 %   RULES = exportAutosarMapping(MODEL) returns property rules for the loaded
 %   AUTOSAR Classic model. [] uses the current model. No model changes occur.
 %   exportAutosarMapping(MODEL, CSVFILE) writes a new UTF-8 CSV. Existing files
@@ -7,11 +7,18 @@ function rules = exportAutosarMapping(model, filename)
 %   configureAutosarMapping. Requires MATLAB/Simulink R2024a+, AUTOSAR Blockset.
 %   Unsupported, inapplicable and unavailable-release properties are excluded.
 %   Inactive NvBlockNeeds fields are omitted when NeedsNVRAMAccess=false.
+%   Runnable internal-data methods are omitted when grouping is disabled;
+%   native latent values remain untouched and available for rollback.
     adapter = autosarMapping.CodeMappingAdapter(model);
     records = adapter.inventory();
     rules = array2table(strings(0, 5), 'VariableNames', {'Model', 'Category', 'Element', 'Property', 'Value'});
     for k = 1:numel(records)
         values = adapter.read(records(k));
+        if records(k).Category == "Functions" && ...
+                strcmp(get_param(char(adapter.Model), 'GroupInternalDataByFunction'), 'off') && ...
+                isfield(values, 'SwAddrMethodForInternalData')
+            values = rmfield(values, 'SwAddrMethodForInternalData');
+        end
         for name = string(fieldnames(values))'
             rules(end + 1, :) = {adapter.Model, records(k).Category, records(k).Element, name, values.(char(name))}; %#ok<AGROW>
         end

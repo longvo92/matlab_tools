@@ -1,5 +1,5 @@
 function report = configureAutosarMapping(model, source, opts)
-%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.2).
+%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.3).
 %   REPORT = configureAutosarMapping(MODEL, CSVFILE) previews property rules
 %   with columns Model,Category,Element,Property,Value. This single CSV also
 %   manages SwAddrMethod. SOURCE can be a table.
@@ -16,8 +16,9 @@ function report = configureAutosarMapping(model, source, opts)
 %   changed model/config inputs before applying (used by autosarMappingGui).
 %   All changes to one element are written together so coupled properties
 %   (port/data element, memory type/attributes) never depend on CSV row order.
-%   Defaults are applied before element mappings. Failure restores attempted
-%   changed settings and registration if a native setter fails.
+%   Apply orders defaults and function writes by the final grouping mode:
+%   runnable methods are cleared before disabling grouping. Failure restores
+%   attempted changed settings and registration if a native setter fails.
 %
 %   Categories: Inports, Outports, Functions, FunctionCallers, DataTransfers,
 %   ModelParameters, ModelParameterArguments, Signals, States, DataStores,
@@ -203,7 +204,12 @@ function report = configureAutosarMapping(model, source, opts)
         error('AutosarMapping:StalePreview', 'Model or configuration changed after preview. Run Preview again.');
     end
     if strcmp(mode, 'apply') && changed > 0
-        priority = arrayfun(@(t) t.Record.Category ~= "Defaults", tasks);
+        priority = double(arrayfun(@(t) t.Record.Category ~= "Defaults", tasks));
+        if grouping == "off"
+            % Clear runnable methods while grouping is still enabled, before
+            % applying defaults that disable access to those native fields.
+            priority(arrayfun(@(t) t.Record.Category == "Functions", tasks)) = -1;
+        end
         [~, order] = sort(priority);
         autosarMapping.applyCodeMapping(adapter, tasks(order));
         plan.Status(plan.Status == "Change") = "Applied";

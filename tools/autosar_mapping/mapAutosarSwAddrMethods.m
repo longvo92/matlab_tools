@@ -1,5 +1,5 @@
 function report = mapAutosarSwAddrMethods(model, source, opts)
-%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.3.2).
+%MAPAUTOSARSWADDRMETHODS Manage SwAddrMethods by model/type (version 1.3.3).
 %   REPORT = mapAutosarSwAddrMethods(MODEL, CSVFILE) previews all existing
 %   explicit AUTOSAR mappings covered by the model's rules. Pass [] as MODEL
 %   to use the current model. MODEL must already be loaded. SOURCE can also

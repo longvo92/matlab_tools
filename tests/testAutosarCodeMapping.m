@@ -119,7 +119,93 @@ function testAutosarCodeMapping()
     local_inactiveNvBlockNeeds();
     local_busPorts();
     local_constantMemoryCalibration(model);
+    local_internalDataGrouping();
     fprintf('PASS: Code Mapping export/CSV, access modes, data/argument/NVRAM/default/function settings, registration, IRV, bus ports, inactive NvBlockNeeds, shared-entity rollback.\n');
+end
+
+function local_internalDataGrouping()
+    [~, model] = fileparts(tempname);
+    new_system(model);
+    closeModel = onCleanup(@() close_system(model, 0));
+    set_param(model, 'SystemTargetFile', 'autosar.tlc', 'Solver', 'FixedStepDiscrete', ...
+        'FixedStep', '0.1', 'SolverMode', 'MultiTasking', 'GroupInternalDataByFunction', 'on');
+    for k = 1:2
+        name = sprintf('Rate%d', k);
+        add_block('built-in/Inport', [model '/' name], 'SampleTime', num2str(k / 10));
+        add_block('simulink/Discrete/Unit Delay', [model '/' name 'Delay']);
+        add_block('built-in/Outport', [model '/' name 'Out']);
+        add_line(model, [name '/1'], [name 'Delay/1']);
+        add_line(model, [name 'Delay/1'], [name 'Out/1']);
+    end
+    autosar.api.create(model, 'default');
+    autosar.api.syncModel(model);
+    mapping = autosar.api.getSimulinkMapping(model);
+    properties = autosar.api.getAUTOSARProperties(model);
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'GroupVar', 'SectionType', 'Var');
+    properties.addPackageableElement('SwAddrMethod', '/Test/Sections', 'GroupCode', 'SectionType', 'Code');
+    mapping.setInternalDataPackaging('PrivateGlobal');
+    functions = string(mapping.find('Functions'));
+    functions = functions(startsWith(functions, 'Periodic'));
+    assert(numel(functions) == 2, 'Expected rate runnables, got: %s', strjoin(functions, ', '));
+    for name = functions(:)'
+        runnable = mapping.getFunction(char(name));
+        mapping.mapFunction(char(name), runnable, 'SwAddrMethod', 'GroupCode', ...
+            'SwAddrMethodForInternalData', 'GroupVar');
+    end
+    baseline = exportAutosarMapping(model);
+    disable = local_rules(model, ["Defaults"; "Defaults"], ["InternalData"; "InternalData"], ...
+        ["GroupInternalDataByFunction"; "Packaging"], ["off"; "Default"]);
+    for name = functions(:)'
+        disable = [disable; local_rules(model, ["Functions"; "Functions"], [name; name], ...
+            ["SwAddrMethod"; "SwAddrMethodForInternalData"], [""; ""])]; %#ok<AGROW>
+    end
+    preview = configureAutosarMapping(model, disable);
+    assert(isequal(baseline, exportAutosarMapping(model)));
+    applied = configureAutosarMapping(model, disable, struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
+    assert(applied.Compliant && applied.Applied == preview.Changed);
+    local_assertInternalMethods(mapping, functions, "");
+    assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), 'off'));
+    assert(strcmp(mapping.getInternalDataPackaging(), 'Default'));
+    assert(configureAutosarMapping(model, disable, struct('Mode', 'apply')).Applied == 0);
+
+    % Restoring an enabled baseline applies defaults before function setters.
+    local_apply(model, baseline);
+    assert(isequal(baseline, exportAutosarMapping(model)));
+    groupOff = disable(1, :);
+    local_apply(model, groupOff);
+    local_assertInternalMethods(mapping, functions, "GroupVar");
+    inactive = exportAutosarMapping(model);
+    assert(~any(inactive.Category == "Functions" & inactive.Property == "SwAddrMethodForInternalData"));
+    assert(configureAutosarMapping(model, inactive, struct('Mode', 'apply')).Applied == 0);
+
+    % Clear latent values while grouping is already off, without leaving it on.
+    local_apply(model, disable);
+    local_assertInternalMethods(mapping, functions, "");
+    assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), 'off'));
+
+    badPort = local_rules(model, "Outports", "Rate1Out", "Port", "MissingPort");
+    for grouping = ["on", "off"]
+        local_apply(model, baseline);
+        if grouping == "off", local_apply(model, groupOff); end
+        before = exportAutosarMapping(model);
+        set_param(model, 'Dirty', 'off');
+        failure = local_error(@() configureAutosarMapping(model, [disable; badPort], struct('Mode', 'apply')), ...
+            'AutosarMapping:ApplyFailed');
+        assert(isscalar(failure.cause), 'Native grouping rollback must succeed.');
+        assert(isequal(before, exportAutosarMapping(model)));
+        assert(strcmp(get_param(model, 'GroupInternalDataByFunction'), grouping));
+        assert(strcmp(get_param(model, 'Dirty'), 'off'));
+        local_assertInternalMethods(mapping, functions, "GroupVar");
+    end
+    fprintf('PASS: D1/D2 grouping transitions, explicit/latent clears, inactive export, rollback and dirty preservation.\n');
+end
+
+function local_assertInternalMethods(mapping, functions, expected)
+    for name = functions(:)'
+        [~, ~, method] = mapping.getFunction(char(name));
+        if strcmp(method, '<None>'), method = ''; end
+        assert(strcmp(method, expected));
+    end
 end
 
 function local_constantMemoryCalibration(model)

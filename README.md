@@ -26,7 +26,7 @@
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
-| **AUTOSAR Code Mappings** | `1.3.2` | CLI/GUI to preview/apply per-model mapping rules, including SwAddrMethod, access modes, memory/calibration/NVRAM settings and defaults in one CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
+| **AUTOSAR Code Mappings** | `1.3.3` | CLI/GUI to preview/apply per-model mapping rules, including SwAddrMethod, access modes, memory/calibration/NVRAM settings and defaults in one CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
@@ -241,8 +241,12 @@ Use the five-column CSV above for all new configurations, including
 SwAddrMethod. `mapAutosarSwAddrMethods` still accepts existing three-column
 `Model,Type,SwAddrMethod` files; `readAutosarMappingRules` validates them. No
 separate three-column example file is shipped. Methods must already exist in the
-model or its AUTOSAR dictionary with compatible SectionType. On R2024a,
-`SwAddrMethodForInternalData` also requires `GroupInternalDataByFunction=on`.
+model or its AUTOSAR dictionary with compatible SectionType. On R2024a, a
+nonempty `SwAddrMethodForInternalData` requires `GroupInternalDataByFunction=on`.
+Apply clears runnable methods before disabling grouping. Explicit empty rules
+also clear latent methods when grouping is already off; Apply temporarily
+enables their native setter and restores the grouping flag. Export omits these
+inactive methods while grouping is off, leaving their stored values intact.
 `ConstantMemory` supports both `Const` and `Calprm` methods, such as
 `CONST_8BIT` or `CALIB_8BIT`; selecting a calibration section keeps the parameter
 mapped to `ConstantMemory`. This applies to both CSV APIs and the GUI.
