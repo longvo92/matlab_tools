@@ -82,6 +82,11 @@ function testAutosarCalibrationAndGui(screenshotFile)
     rows = keepAuto.Elements.Element == "Cal_Speed";
     assert(sum(rows) == 1 && keepAuto.Elements.Desired(rows) == "Auto");
 
+    unchangedRule = rules(1, :);
+    unchangedRule.Element = "Cal_Existing";
+    unchangedRule.Property = "MappedTo";
+    unchangedRule.Value = "ConstantMemory";
+    writetable([rules; unchangedRule], csv);
     fig = autosarMappingGui(model, struct('Source', csv, 'CalibrationConfig', filename, 'Visible', 'off'));
     closeGui = onCleanup(@() delete(fig));
     previewButton = findall(fig, 'Tag', 'AutosarMappingPreview');
@@ -94,6 +99,10 @@ function testAutosarCalibrationAndGui(screenshotFile)
     assert(isempty(fig.UserData.LastError) && ~fig.UserData.Busy);
     assert(isequal(guiPreview.Elements, configureAutosarMapping(model, csv, options).Elements));
     assert(strcmp(applyButton.Enable, 'on') && size(results.Data, 1) == height(guiPreview.Elements));
+    assert(isequal(results.Data, cellstr(guiPreview.Elements{:,:})));
+    assert(any(guiPreview.Elements.Status == "Change") && any(guiPreview.Elements.Status == "Unchanged"));
+    assert(all(guiPreview.Elements.Status(1:guiPreview.Changed) == "Change"));
+    assert(all(guiPreview.Elements.Status(guiPreview.Changed + 1:end) == "Unchanged"));
     config.IgnoreCase = true;
     local_json(filename, config);
     local_click(applyButton);

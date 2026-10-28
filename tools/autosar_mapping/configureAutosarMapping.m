@@ -1,5 +1,5 @@
 function report = configureAutosarMapping(model, source, opts)
-%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.0).
+%CONFIGUREAUTOSARMAPPING Configure AUTOSAR Classic Code Mappings (v1.3.1).
 %   REPORT = configureAutosarMapping(MODEL, CSVFILE) previews property rules
 %   with columns Model,Category,Element,Property,Value. This single CSV also
 %   manages SwAddrMethod. SOURCE can be a table.
@@ -25,6 +25,8 @@ function report = configureAutosarMapping(model, source, opts)
 %   '*' for a category, or 'type:StaticMemory' (or another current memory type).
 %   'type?:StaticMemory' skips a missing type and reports it in SkippedRules.
 %   Conflicting/overlapping rules and unmatched strict selectors are errors.
+%   Report rows list changes first, ignored settings next, unchanged rows last.
+%   Order within each group is preserved; snapshots retain native plan order.
 %
 %   CSV properties include DataAccessMode (implicit/explicit/queued/E2E),
 %   Port, DataElement, Runnable, Operation, InterRunnableVariable, MappedTo,
@@ -204,13 +206,14 @@ function report = configureAutosarMapping(model, source, opts)
         autosarMapping.applyCodeMapping(adapter, tasks(order));
         plan.Status(plan.Status == "Change") = "Applied";
     end
-    report = struct('Model', adapter.Model, 'Mode', string(mode), 'Elements', plan, ...
+    elements = autosarMapping.sortReportElements(plan);
+    report = struct('Model', adapter.Model, 'Mode', string(mode), 'Elements', elements, ...
         'Changed', changed, 'Applied', sum(plan.Status == "Applied"), ...
         'Compliant', ~any(plan.Status == "Change"), 'CalibrationConfig', config.File, ...
         'CalibrationMatches', calibration, 'SkippedRules', skippedRules, 'Snapshot', snapshot);
     if nargout == 0
         fprintf('AUTOSAR Code Mappings [%s] %s: %d changes, %d applied.\n', ...
             mode, adapter.Model, changed, report.Applied);
-        disp(plan);
+        disp(report.Elements);
     end
 end

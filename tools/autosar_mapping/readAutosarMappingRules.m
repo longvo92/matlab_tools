@@ -1,5 +1,5 @@
 function rules = readAutosarMappingRules(source)
-%READAUTOSARMAPPINGRULES Read per-model SwAddrMethod rules (version 1.3.0).
+%READAUTOSARMAPPINGRULES Read per-model SwAddrMethod rules (version 1.3.1).
 %   RULES = readAutosarMappingRules(CSVFILE) reads a UTF-8 comma-delimited file
 %   with exactly these columns: Model, Type, SwAddrMethod. SOURCE can also be
 %   a table with the same columns. Whitespace is trimmed; Type ignores case.

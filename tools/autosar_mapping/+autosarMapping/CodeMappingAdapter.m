@@ -1,5 +1,5 @@
 classdef CodeMappingAdapter
-%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.3.0).
+%CODEMAPPINGADAPTER Native AUTOSAR Code Mappings adapter (version 1.3.1).
 %   Internal bundle implementation. Uses documented mapping methods only;
 %   unavailable properties are not exported and cannot silently be ignored.
     properties (SetAccess = private)

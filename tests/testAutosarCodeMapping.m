@@ -76,10 +76,20 @@ function testAutosarCodeMapping()
         ["ReadWrite"; "true"; "%3.5f"; "true"; "true"; "false"; "false"; "Delay state"; ...
         "PerInstanceParameter"; "VAR"; "Client2"; "PrivateGlobal"; "on"; "TransformerError"; "CODE"; "VAR"]);
     before = exportAutosarMapping(model);
+    currentPort = before.Value(before.Category == "Inports" & before.Element == "Input" & before.Property == "Port");
+    changes = [changes; local_rules(model, "Inports", "Input", "Port", currentPort)];
     preview = configureAutosarMapping(model, changes);
     assert(preview.Changed > 10 && preview.Applied == 0 && isequal(before, exportAutosarMapping(model)));
-    applied = configureAutosarMapping(model, changes, struct('Mode', 'apply'));
+    nativePlan = preview.Snapshot.Plan;
+    changedRows = nativePlan.Status == "Change";
+    assert(any(changedRows) && any(~changedRows));
+    assert(isequal(preview.Elements, [nativePlan(changedRows, :); nativePlan(~changedRows, :)]));
+    applied = configureAutosarMapping(model, changes, ...
+        struct('Mode', 'apply', 'ExpectedSnapshot', preview.Snapshot));
     assert(applied.Compliant && applied.Applied == preview.Changed);
+    expected = preview.Elements;
+    expected.Status(expected.Status == "Change") = "Applied";
+    assert(isequal(applied.Elements, expected));
     assert(isequal(bytes, local_bytes(saved)), 'Apply must never save the model.');
     assert(string(mapping.getParameter('Arg')) == "PerInstanceParameter");
     assert(string(mapping.getDataStore([model '/Memory'], 'NeedsNVRAMAccess')) == "true");
@@ -326,6 +336,9 @@ function local_inactiveNvBlockNeeds()
     ignored = preview.Elements(preview.Elements.Status == "Ignored", :);
     assert(height(ignored) == 2 && ...
         all(ismember(ignored.Property, ["RestoreAtStart", "StoreAtShutdown"])));
+    nativePlan = preview.Snapshot.Plan;
+    assert(isequal(preview.Elements, [nativePlan(nativePlan.Status == "Change", :); ...
+        nativePlan(nativePlan.Status == "Ignored", :); nativePlan(nativePlan.Status == "Unchanged", :)]));
     applied = configureAutosarMapping(model, legacy, struct('Mode', 'apply'));
     assert(applied.Compliant && strcmp(mapping.getDataStore(block), 'ArTypedPerInstanceMemory'));
     assert(strcmp(mapping.getDataStore(block, 'NeedsNVRAMAccess'), 'false'));

@@ -2,6 +2,12 @@
 
 ## AUTOSAR Code Mappings
 
+### 1.3.1 - 2026-10-28
+
+- List changes before ignored/unconfigured and unchanged rows in CLI/GUI
+  reports, including the legacy SwAddrMethod API. Keep Apply targets and
+  preview freshness checks independent of display order.
+
 ### 1.3.0 - 2026-10-27
 
 - Use one property-based CSV for Code Mapping and SwAddrMethod rules; retain
@@ -122,6 +128,11 @@
   the interface bundle version. Property differences remain report-only.
 
 ## Bus element signal naming
+
+### 2.0.3 - 2026-10-28
+
+- List naming and propagation changes first in CLI/GUI reports, with skipped
+  items next and unchanged items last. Preserve order within each group.
 
 ### 2.0.2 - 2026-10-26
 

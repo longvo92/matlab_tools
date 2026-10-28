@@ -1,6 +1,6 @@
 function report = nameBusElementSignals(sys, opts)
 %NAMEBUSELEMENTSIGNALS Name signal lines after the Element of each In/Out Bus Element block.
-% Version: 2.0.2 (Signal naming).
+% Version: 2.0.3 (Signal naming).
 %
 %   IN BUS ELEMENT : the line leaving the block is named after its Element;
 %                    its ShowPropagatedSignals setting is left unchanged.
@@ -51,6 +51,8 @@ function report = nameBusElementSignals(sys, opts)
 %
 %   REPORT is a struct array with fields: block, kind ('In'/'Out'), element,
 %   name, parent, status, propagated.
+%   Naming/propagation changes appear first, skipped/errors next, and already
+%   named rows without changes last. Order within each group is preserved.
 %
 %   Example:
 %     r = nameBusElementSignals('EVCC_ChargeCtrl', struct('dryRun', true));
@@ -82,6 +84,7 @@ function report = nameBusElementSignals(sys, opts)
     end
 
     report = local_emptyReport();
+    changedTraceBlocks = {};
 
     %% ------------------------- IN BUS ELEMENT ---------------------------
     inBlks = local_findBusElementPorts(sys, 'Inport', opts.recurse);
@@ -130,7 +133,10 @@ function report = nameBusElementSignals(sys, opts)
             tracePath(tracePath == ln)    = [];   % already handled above
             tracePath(tracePath == lnSrc) = [];   % this line gets the name below
             for k = 1:numel(tracePath)
-                local_setPropagated(tracePath(k), opts);
+                traceNote = local_setPropagated(tracePath(k), opts);
+                if any(strcmp(traceNote, {'dry-run', 'on'}))
+                    changedTraceBlocks{end + 1} = blk; %#ok<AGROW>
+                end
             end
         end
         if ~local_isValidLine(lnSrc)
@@ -151,6 +157,12 @@ function report = nameBusElementSignals(sys, opts)
     end
 
     %% ------------------------------ output -------------------------------
+    changed = startsWith({report.status}, {'dry-run', 'set'}) | ...
+        ismember({report.propagated}, {'dry-run', 'on'}) | ...
+        ismember({report.block}, changedTraceBlocks);
+    unchanged = startsWith({report.status}, 'ok:') & ~changed & ...
+        ~startsWith({report.propagated}, 'err:');
+    report = report([find(changed), find(~changed & ~unchanged), find(unchanged)]);
     if opts.verbose
         local_printReport(report, opts);
     end

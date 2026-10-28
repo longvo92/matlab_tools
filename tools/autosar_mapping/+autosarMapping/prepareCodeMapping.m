@@ -1,5 +1,5 @@
 function after = prepareCodeMapping(adapter, record, before, edited)
-%PREPARECODEMAPPING Validate scalar rules and assemble native tuple (v1.3.0).
+%PREPARECODEMAPPING Validate scalar rules and assemble native tuple (v1.3.1).
     after = before;
     for name = string(fieldnames(edited))'
         after.(char(name)) = edited.(char(name));

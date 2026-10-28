@@ -22,11 +22,11 @@
 
 | Tool | Version | What it does | Copy |
 | --- | --- | --- | --- |
-| **Bus element signal naming** | `2.0.2` | CLI and GUI to name In/Out Bus Element signals, stop tracing at Signal Copy/Conversion or Specification, and show propagated Out Bus labels. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
+| **Bus element signal naming** | `2.0.3` | CLI and GUI to name In/Out Bus Element signals, stop tracing at Signal Copy/Conversion or Specification, and show propagated Out Bus labels. | [Backend](tools/signal_naming/nameBusElementSignals.m) + optional [GUI](tools/signal_naming/nameBusElementSignalsGui.m) |
 | **Forbidden block checker** | `1.0.1` | Checks models and references against JSON rules. Active violations stop the pipeline; commented blocks and blocks feeding only Terminators produce warnings. | [checkForbiddenBlocks.m](tools/forbidden_blocks/checkForbiddenBlocks.m) + [JSON rules](tools/forbidden_blocks/forbidden_blocks.json) |
 | **Quick simulation setup** | `1.0.1` | Creates a model, loads MAT data and M-file scripts, links an SLDD, and reuses the first available workspace config set. | [quickSimEnv.m](tools/quick_sim/quickSimEnv.m) |
 | **Interface tools** | `1.10.2` | Compares Excel buses directly with SLDD Data Interfaces; lets you tick individual element/property changes to apply, and generates parameter M-files. | [Interface bundle](tools/interface_tools/) |
-| **AUTOSAR Code Mappings** | `1.3.0` | CLI/GUI to preview/apply per-model mapping rules, including SwAddrMethod, access modes, memory/calibration/NVRAM settings and defaults in one CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
+| **AUTOSAR Code Mappings** | `1.3.1` | CLI/GUI to preview/apply per-model mapping rules, including SwAddrMethod, access modes, memory/calibration/NVRAM settings and defaults in one CSV. | [AUTOSAR mapping bundle](tools/autosar_mapping/) |
 
 ## Quick start
 
@@ -34,6 +34,10 @@ Copy the tool you need into a folder on your MATLAB path. No package installatio
 or shared repository helpers are needed. Keep adjacent JSON files with their tools;
 copy the entire interface bundle when using its GUI. Copy the entire AUTOSAR
 mapping folder, including `+autosarMapping`, when using Code Mappings.
+
+Preview reports in CLI and GUI list changes first, skipped/ignored items next,
+and unchanged items last, keeping the existing order within each group.
+Interface previews already contain differences only.
 
 ```matlab
 % Preview signal naming changes in the current system
