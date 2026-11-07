@@ -317,6 +317,11 @@ it retains the full session history. **Follow latest** shows new messages at the
 is needed. Turn it off to pause the view while reading earlier entries, then
 turn it on to catch up. The status line continues updating while the view is paused.
 
+An element missing from the SLDD is eligible for **ADD** only when at least one
+Excel row for that element in the compared buses has the exact **`Status = Accept`**
+value. Case and spaces matter. Multiple `Status` headers for a compared bus stop
+comparison.
+
 Only Excel rows with **`Status = remove`** propose a deletion (case-insensitive,
 with surrounding spaces ignored). Missing/blank/other Status values and elements
 absent from Excel never authorize deletion. Remove rows do not create additions
@@ -334,7 +339,7 @@ selected. The table refreshes after Apply and clears the selection. Changing
 the workbook/sheets clears the preview. Operations use exactly the selected
 sheet names, including sheets with headers beyond column AZ. Close the window
 after the current operation finishes. If compared data changes after Preview,
-including a change to remove Status, run Preview again before applying.
+including a change to addition or removal eligibility, run Preview again before applying.
 
 ```matlab
 preview = sync_bus_interfaces_from_excel('new.xlsx', 'architecture.sldd', 'all', 'preview');

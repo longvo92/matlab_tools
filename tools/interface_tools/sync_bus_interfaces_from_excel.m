@@ -31,6 +31,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 % Compares in memory, then saves only successfully applied element changes.
 %
 % NOTES / SAFETY:
+%   - Missing elements are added only when an Excel row has exactly Status=Accept.
+%     Multiple Status headers for a compared bus stop comparison.
 %   - Only Status=remove (case-insensitive, trimmed) proposes a deletion.
 %     Missing/blank/other Status values never authorize removal. Elements
 %     absent from Excel are kept. Remove rows never propose additions.
@@ -232,13 +234,24 @@ function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedShe
     for i = 1:numel(sheets)
         sheet = sheets{i};
         logMessage('[READ XLSX] %d/%d: %s\n', i, numel(sheets), sheet);
-        raw = readcell(file, 'Sheet', sheet);
+        % Start at column A so the detected Status index is a worksheet column.
+        raw = readcell(file, 'Sheet', sheet, 'Range', 'A1');
         [headerRow, cols] = detectHeaders(raw, {'Bus', 'Element'});
         if headerRow == 0
             if ismember(sheet, selectedSheets) && numel(selectedSheets) < numel(sheets)
                 error('Selected sheet "%s" does not contain Bus/Element columns.', sheet);
             end
             continue; % Ignore notes/metadata sheets in all-sheet mode.
+        end
+        ambiguousStatus = numel(cols.status) > 1;
+        accepted = false(size(raw, 1), 1);
+        if isscalar(cols.status)
+            % Preserve Status whitespace and align to the rows returned by readcell.
+            statusOptions = spreadsheetImportOptions('Sheet', sheet, 'NumVariables', size(raw, 2));
+            statusOptions.SelectedVariableNames = statusOptions.VariableNames(cols.status);
+            statusOptions = setvaropts(statusOptions, cols.status, 'WhitespaceRule', 'preserve');
+            statusTable = readtable(file, statusOptions);
+            accepted = strcmp(statusTable{end-size(raw, 1)+1:end, 1}, 'Accept');
         end
         selected = ismember(sheet, selectedSheets);
         previousBus = '';
@@ -249,12 +262,16 @@ function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedShe
             if isempty(bus) && ~isempty(elem), bus = previousBus; end
             if isempty(bus) && isempty(elem), continue; end
             if isempty(elem), continue; end  % Bus heading, no element row.
+            statusText = '';
+            if isscalar(cols.status), statusText = getText(raw, r, cols.status); end
             rec = struct('bus', bus, 'element', elem, ...
                 'dataType', getText(raw, r, cols.datatype), ...
                 'dimensions', getText(raw, r, cols.dimensions), ...
                 'unit', getText(raw, r, cols.unit), ...
                 'description', getText(raw, r, cols.description), ...
-                'removeRequested', strcmpi(getText(raw, r, cols.status), 'remove'), ...
+                'addRequested', accepted(r) && strcmp(statusText, 'Accept'), ...
+                'removeRequested', strcmpi(statusText, 'remove'), ...
+                'ambiguousStatus', ambiguousStatus, ...
                 'origin', sprintf('%s:%d', sheet, r));
             records{end+1} = rec; %#ok<AGROW>
             if selected, selectedBuses(bus) = true; end
@@ -270,6 +287,10 @@ function expected = local_mergeSourceRows(records, scope)
         bus = rec.bus;
         elem = rec.element;
         if ~isKey(scope, bus), continue; end
+        if rec.ambiguousStatus
+            error('InterfaceTools:AmbiguousElementStatus', ...
+                'Source %s has multiple Status headers. Keep one Status column and retry.', rec.origin);
+        end
         if ~isvarname(bus) || ~isvarname(elem)
             error('Invalid Bus/Element in source %s: %s / %s', rec.origin, bus, elem);
         end
@@ -288,6 +309,7 @@ function expected = local_mergeSourceRows(records, scope)
                     bus, elem, other.origin, rec.origin);
             end
             if ~rec.removeRequested
+                other.addRequested = other.addRequested || rec.addRequested;
                 for field = {'unit', 'description'}
                     f = field{1};
                     if ~isempty(other.(f)) && ~isempty(rec.(f)) && ~strcmp(other.(f), rec.(f))
@@ -345,11 +367,11 @@ function rec = local_readElement(bus, elementObj)
         'dataType', strtrim(dataType), ...
         'dimensions', strtrim(char(elementObj.Dimensions)), ...
         'unit', strtrim(unit), 'description', strtrim(char(elementObj.Description)), ...
-        'removeRequested', false, 'origin', bus);
+        'addRequested', false, 'removeRequested', false, 'origin', bus);
 end
 
 function snapshot = local_createSnapshot(expected, actual, scope)
-    snapshot = cell(0, 8);
+    snapshot = cell(0, 9);
     inventories = {expected, actual};
     for side = 1:2
         inventory = inventories{side};
@@ -358,7 +380,7 @@ function snapshot = local_createSnapshot(expected, actual, scope)
             row = inventory(names{i});
             if ~isKey(scope, row.bus), continue; end
             snapshot(end+1, :) = {side, row.bus, row.element, row.dataType, ...
-                row.dimensions, row.unit, row.description, row.removeRequested}; %#ok<AGROW>
+                row.dimensions, row.unit, row.description, row.removeRequested, row.addRequested}; %#ok<AGROW>
         end
     end
 end
@@ -415,6 +437,7 @@ function [addKeys, removeKeys, differences, compared, changes] = compareInterfac
             continue; % Already absent: do not add or compare deletion-row metadata.
         end
         if ~isKey(actual, k)
+            if ~x.addRequested, continue; end
             addKeys{end+1} = k; %#ok<AGROW>
             changes(end+1, :) = {'ADD', [x.bus '.' x.element], ...
                 'element', local_describeElement(x), '<missing>'}; %#ok<AGROW>
@@ -665,7 +688,7 @@ function [headerRow, cols] = detectHeaders(raw, required)
         cols.dimensions = pickCol(headers, ["dim", "dimension", "dimensions"]);
         cols.unit = pickCol(headers, ["unit", "units"]);
         cols.description = pickCol(headers, "description");
-        cols.status = pickCol(headers, "status");
+        cols.status = find(headers == "status");
         return;
     end
 end
