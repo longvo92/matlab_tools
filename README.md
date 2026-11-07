@@ -289,7 +289,7 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 
 Generated parameters normalize numeric text such as `1,000` to `1000` and retain
 line breaks in descriptions. Generation uses a temporary file before replacing
-the output.
+the output. A parameter sheet with multiple `Status` headers stops generation.
 
 Preview reads **Data Interfaces in Architectural Data** directly from the
 configured SLDD. Only buses named in the selected Excel sheets are compared;
