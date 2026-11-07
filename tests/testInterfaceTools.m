@@ -32,7 +32,7 @@ function testInterfaceTools(scope)
         source(end+1, :) = {'BusA', name, 'double', '1', 'Accept', sprintf('pA%02d', k), k}; %#ok<AGROW>
     end
     for k = 1:35
-        source(end+1, :) = {'BusA', sprintf('New%02d', k), 'double', '1', '', '', ''}; %#ok<AGROW>
+        source(end+1, :) = {'BusA', sprintf('New%02d', k), 'double', '1', 'Accept', '', ''}; %#ok<AGROW>
     end
     source(end+1, :) = {'BusA', 'Old', '', '', 'remove', '', ''};
     addElement(bus, 'Old');
@@ -300,16 +300,16 @@ function local_testDirectSnapshot(sandbox)
     refBefore = local_bytes(referenceFile);
 
     source = fullfile(sandbox, 'direct.xlsx');
-    rows = {'Bus', 'Element', 'DataType', 'Dim', 'Unit', 'Description'; ...
-        'Bus', 'Vector', 'single', '2x3', 'm/s', 'Vehicle speed'; ...
-        'Bus', 'Nested', 'Bus: Inner', '1', '', ''; ...
-        'Bus', 'Struct', 'Bus: Record', '1', '', ''; ...
-        'Bus', 'Alias', 'Counter', '1', '', ''; ...
-        'Bus', 'NamedValue', 'single', '1', 'm/s', ''; ...
-        'Inner', 'Value', 'double', '1', '', ''; ...
-        'Referenced', 'Keep', 'uint8', '1', '', ''; ...
-        'Referenced', 'New', 'double', '1', '', ''; ...
-        'NewBus', 'New', 'uint16', '2', '', ''};
+    rows = {'Bus', 'Element', 'DataType', 'Dim', 'Unit', 'Description', 'Status'; ...
+        'Bus', 'Vector', 'single', '2x3', 'm/s', 'Vehicle speed', ''; ...
+        'Bus', 'Nested', 'Bus: Inner', '1', '', '', ''; ...
+        'Bus', 'Struct', 'Bus: Record', '1', '', '', ''; ...
+        'Bus', 'Alias', 'Counter', '1', '', '', ''; ...
+        'Bus', 'NamedValue', 'single', '1', 'm/s', '', ''; ...
+        'Inner', 'Value', 'double', '1', '', '', ''; ...
+        'Referenced', 'Keep', 'uint8', '1', '', '', ''; ...
+        'Referenced', 'New', 'double', '1', '', '', 'Accept'; ...
+        'NewBus', 'New', 'uint16', '2', '', '', 'Accept'};
     writecell(rows, source);
     [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
     assert(report.ToAdd == 2 && report.ToRemove == 0 && report.MetadataMismatch == 1);
@@ -355,8 +355,8 @@ function local_testDirectSnapshot(sandbox)
 
     % A late API error must roll back earlier successful additions as well.
     before = local_bytes(file);
-    rows(end+1, :) = {'Bus', 'AValid', 'double', '1', '', ''};
-    rows(end+1, :) = {'Bus', 'ZInvalid', 'Bus: MissingType', '1', 'm/s', ''};
+    rows(end+1, :) = {'Bus', 'AValid', 'double', '1', '', '', 'Accept'};
+    rows(end+1, :) = {'Bus', 'ZInvalid', 'Bus: MissingType', '1', 'm/s', '', 'Accept'};
     writecell(rows, source);
     failed = false;
     try
@@ -384,7 +384,7 @@ function local_testSelectedChanges(sandbox)
     close(dd);
     source = fullfile(sandbox, 'selected.xlsx');
     rows = {'Bus', 'Element', 'DataType', 'Status'; 'Selected', 'Keep', 'uint8', ''; ...
-        'Selected', 'AddA', 'double', ''; 'Selected', 'AddB', 'single', ''; ...
+        'Selected', 'AddA', 'double', 'Accept'; 'Selected', 'AddB', 'single', 'Accept'; ...
         'Selected', 'RemoveA', '', 'remove'; 'Selected', 'RemoveB', '', 'remove'};
     writecell(rows, source);
     [~, report] = evalc('sync_bus_interfaces_from_excel(source, file, "all", "preview")');
@@ -411,6 +411,12 @@ function local_testSelectedChanges(sandbox)
         'InterfaceTools:StalePreview');
     assert(isequal(before, local_bytes(file)));
     rows{3, 3} = 'double';
+    rows{3, 4} = 'not used';
+    writecell(rows, source);
+    local_expectError(@() sync_bus_interfaces_from_excel(source, file, 'all', opts), ...
+        'InterfaceTools:StalePreview');
+    assert(isequal(before, local_bytes(file)));
+    rows{3, 4} = 'Accept';
     writecell(rows, source);
     dd = Simulink.dictionary.archdata.open(file);
     element = getElement(getInterface(dd, 'Selected'), 'Keep');
@@ -434,7 +440,7 @@ function local_testSelectedChanges(sandbox)
     close(dd);
     % An Excel bus absent from SLDD yields additions and a typed empty inventory.
     missing = fullfile(sandbox, 'missing.xlsx');
-    writecell({'Bus', 'Element', 'DataType'; 'NewBus', 'New', 'double'}, missing);
+    writecell({'Bus', 'Element', 'DataType', 'Status'; 'NewBus', 'New', 'double', 'Accept'}, missing);
     [~, report] = evalc('sync_bus_interfaces_from_excel(missing, file, "all", "preview")');
     assert(report.ToAdd == 1 && isempty(report.Interfaces));
     clear cleanup;
@@ -489,9 +495,14 @@ function local_testStatusRemoval(sandbox)
     assert(isequal(before, local_bytes(file)));
     % Workbooks without Status never infer deletions from absent elements.
     noStatus = fullfile(sandbox, 'no-status.xlsx');
-    writecell({'Bus', 'Element'; 'StatusBus', 'Blank'}, noStatus);
+    writecell({'Bus', 'Element'; 'StatusBus', 'Blank'; 'MissingBus', 'New'}, noStatus);
     result = sync_bus_interfaces_from_excel(noStatus, file, 'all', 'apply');
-    assert(result.ToRemove == 0 && ~result.Saved && isequal(before, local_bytes(file)));
+    assert(result.ToAdd == 0 && result.ToRemove == 0 && ~result.Saved && isequal(before, local_bytes(file)));
+    writecell({'Bus', 'Element', 'DataType', 'Status', 'Status'; ...
+        'MissingBus', 'New', 'double', 'Accept', 'not used'}, noStatus, 'Sheet', 'Ambiguous');
+    local_expectError(@() sync_bus_interfaces_from_excel(noStatus, file, 'all', 'apply'), ...
+        'InterfaceTools:AmbiguousElementStatus');
+    assert(isequal(before, local_bytes(file)));
     clear cleanup;
     fprintf('PASS: explicit remove Status, missing Status, stale Status, shared conflicts, selected deletion.\n');
 end
@@ -511,9 +522,10 @@ function local_testComparisonScope(sandbox)
     header = {'Bus', 'Element', 'DataType', 'Status'};
     % The unselected sheet is first: scope must not depend on workbook order.
     writecell([header; {'Ignored', 'Value', 'double', 'Accept'; ...
-        'Ignored', 'Value', 'single', 'remove'; 'Valid', 'Keep', 'double', ''}], ...
+        'Ignored', 'Value', 'single', 'remove'; 'Valid', 'Keep', 'double', ''; ...
+        'Valid', 'New', 'double', 'Accept'}], ...
         source, 'Sheet', 'Unselected');
-    selected = [header; {'Valid', 'New', 'double', ''; 'Valid', 'Old', '', 'remove'; ...
+    selected = [header; {'Valid', 'New', 'double', 'not used'; 'Valid', 'Old', '', 'remove'; ...
         'Service', 'Value', 'double', ''; 'Service', 'Value', '', 'remove'; ...
         'Physical', 'Value', 'double', ''}];
     writecell(selected, source, 'Sheet', 'Selected');
@@ -554,7 +566,7 @@ function local_testComparisonScope(sandbox)
     assert(isa(getInterface(dd, 'Physical'), 'Simulink.dictionary.archdata.PhysicalInterface'));
     close(dd);
     % Legacy apply-all also ignores unsupported types instead of aborting a batch.
-    selected(end+1, :) = {'Valid', 'Next', 'single', ''};
+    selected(end+1, :) = {'Valid', 'Next', 'single', 'Accept'};
     writecell(selected, source, 'Sheet', 'Selected');
     result = sync_bus_interfaces_from_excel(source, file, 'Selected', 'apply');
     assert(result.Added == 1 && result.Saved);
@@ -768,7 +780,11 @@ function local_testReviewedRegressions(sandbox)
     close(dd);
     workbook = fullfile(sandbox, 'review-scope.xlsx');
     header = {'Bus', 'Element', 'DataType', 'Status', 'Parameter', 'Value'};
-    writecell([header; {'VisibleBus', 'V', 'double', 'Accept', 'reviewParameter', '1,000'}], ...
+    writecell([header; {'VisibleBus', 'V', 'double', 'Accept', 'reviewParameter', '1,000'; ...
+        'VisibleBus', 'Unused', 'double', 'not used', 'pUnused', 6; ...
+        'VisibleBus', 'Padded', 'double', ' Accept ', 'pPadded', 7; ...
+        'VisibleBus', 'Lowercase', 'double', 'accept', 'pLowercase', 8; ...
+        'OtherBus', 'Blank', 'double', '', 'pBlank', 9}], ...
         workbook, 'Sheet', 'Visible');
     writecell([header; {'HiddenBus', 'H', 'double', 'Accept', 'pOtherSheet', 8; ...
         'HiddenBus', 'I', 'double', 'ACCEPT', 'pUppercase', 9; ...
@@ -776,6 +792,8 @@ function local_testReviewedRegressions(sandbox)
         'HiddenBus', 'K', 'double', 'not used', 'pWideNotUsed', 11; ...
         'HiddenBus', 'L', 'double', '', 'pWideBlank', 12}], ...
         workbook, 'Sheet', 'Wide', 'Range', 'BA35');
+    wide = sync_bus_interfaces_from_excel(workbook, dictionary, 'Wide', 'preview');
+    assert(wide.ToAdd == 1 && isequal(wide.Changes.Interface, {'HiddenBus.H'}));
     config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
         '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
     config.SourceXlsx = workbook;
@@ -808,6 +826,7 @@ function local_testReviewedRegressions(sandbox)
     clear timerCleanup;
     dd = Simulink.dictionary.archdata.open(dictionary);
     assert(isequal(getInterfaceNames(dd), {'VisibleBus'}));
+    assert(isequal({getInterface(dd, 'VisibleBus').Elements.Name}, {'V'}));
     close(dd);
     button = findall(fig, 'Tag', 'GenerateParameters');
     button.ButtonPushedFcn(button, []);

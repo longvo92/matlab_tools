@@ -12,6 +12,7 @@ function fig = interface_tools_gui(opts)
 % Tick individual element/property changes, then Apply selected. Preview is required.
 % Referenced interfaces cannot be selected.
 % Only buses named in selected Excel sheets are compared.
+% ADD requires the exact Status value Accept.
 % REMOVE requires Status=remove in Excel; elements absent from Excel are kept.
 %
 % Requires MATLAB/Simulink R2024a+ and the two adjacent backend M-files.
@@ -358,7 +359,7 @@ function fig = interface_tools_gui(opts)
                 appendLog(sprintf('Preview: %d ADD, %d REMOVE, %d PROPERTY_DIFF; %d editable changes.', ...
                     previewReport.ToAdd, previewReport.ToRemove, previewReport.MetadataMismatch, ...
                     sum(previewReport.Selectable)));
-                appendLog('REMOVE requires Status=remove in Excel; missing elements are kept.');
+                appendLog('ADD requires exact Status=Accept. REMOVE requires Status=remove in Excel.');
                 appendLog(sprintf('%d matching Data Interfaces; tick local element/property changes to apply.', ...
                     height(previewReport.Interfaces)));
             end
