@@ -9,6 +9,7 @@ function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts
 %
 % Required Excel headers: Status, Parameter, Value, DataType, Element.
 % Only rows with the exact Status value Accept are exported (case and spaces matter).
+% A parameter sheet with multiple Status headers stops generation.
 % Each sheet can contain a different header row. Multi-line Parameter and
 % Value cells are matched line-by-line.
 % Numeric text is normalized; descriptions retain embedded line breaks.
@@ -85,6 +86,10 @@ function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts
                 end
             end
             if all(indices > 0)
+                if nnz(strcmp(headers, 'status')) > 1
+                    error('InterfaceTools:AmbiguousParameterStatus', ...
+                        'Sheet "%s" has multiple Status headers. Keep one Status column and retry.', sheet);
+                end
                 hdrRow = r;
                 cols = indices;
                 break;
