@@ -284,7 +284,7 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 
 | Panel | Behavior |
 | --- | --- |
-| **Parameter M-file** | Processes **all parameter sheets**, regardless of the SLDD selection. Confirms before overwriting; preserves the previous file if generation fails. |
+| **Parameter M-file** | Exports only rows with the exact `Status` value `Accept` across **all parameter sheets**. Case and spaces matter. Confirms before overwriting and preserves the previous file if generation fails. |
 | **SLDD interfaces** | Preview compares Excel buses and lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick local additions/removals and individual property changes, then click **Apply selected**. Referenced interfaces remain read-only. |
 
 Generated parameters normalize numeric text such as `1,000` to `1000` and retain

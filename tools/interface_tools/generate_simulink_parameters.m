@@ -8,6 +8,7 @@ function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts
 %   Optional fourth opts.LogFcn callback receives live progress and warnings.
 %
 % Required Excel headers: Status, Parameter, Value, DataType, Element.
+% Only rows with the exact Status value Accept are exported (case and spaces matter).
 % Each sheet can contain a different header row. Multi-line Parameter and
 % Value cells are matched line-by-line.
 % Numeric text is normalized; descriptions retain embedded line breaks.
@@ -64,7 +65,8 @@ function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts
     for s = 1:numel(sheets)
         sheet = sheets(s);
         local_log(opts, '[READ PARAMETERS] %d/%d: %s\n', s, numel(sheets), sheet);
-        cells = readcell(xlsxFile, 'Sheet', sheet);
+        % Start at column A so the detected Status index is a worksheet column.
+        cells = readcell(xlsxFile, 'Sheet', sheet, 'Range', 'A1');
         if isempty(cells)
             continue;
         end
@@ -93,12 +95,20 @@ function generate_simulink_parameters(xlsxFile, outputFile, selectedSheets, opts
             continue;
         end
 
+        % readcell trims text by default. Read just Status with spaces preserved.
+        statusOptions = spreadsheetImportOptions('Sheet', sheet, 'NumVariables', size(cells, 2));
+        statusOptions.SelectedVariableNames = statusOptions.VariableNames(cols(1));
+        statusOptions = setvaropts(statusOptions, cols(1), 'WhitespaceRule', 'preserve');
+        statusTable = readtable(xlsxFile, statusOptions);
+        % Both reads end at the last used row, but readcell drops leading empty rows.
+        status = statusTable{end-size(cells, 1)+1:end, 1};
+
         fprintf(fid, '\n%%%% Sheet: %s\n', sheet);
         fprintf(fid, '%% %s\n\n', repmat('-', 1, 55));
         count = 0;
         skippedBoolean = 0;
         for r = hdrRow + 1:size(cells, 1)
-            if ~strcmpi(strtrim(cellText(cells{r, cols(1)})), 'Accept')
+            if ~strcmp(status{r}, 'Accept')
                 continue;
             end
             names = splitLines(cells{r, cols(2)});
