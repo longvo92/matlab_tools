@@ -285,18 +285,19 @@ interface_tools_gui(struct('ConfigFile', 'C:/local/interface_tools_config.json')
 | Panel | Behavior |
 | --- | --- |
 | **Parameter M-file** | Exports only rows with the exact `Status` value `Accept` across **all parameter sheets**. Case and spaces matter. Confirms before overwriting and preserves the previous file if generation fails. |
-| **SLDD interfaces** | Preview compares Excel buses and lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick local additions/removals and individual property changes, then click **Apply selected**. Referenced interfaces remain read-only. |
+| **SLDD interfaces** | Preview and Apply read only the selected model sheets. Preview lists `ADD`, `REMOVE`, and `PROPERTY_DIFF` as `bus.element`. Tick local additions/removals and individual property changes, then click **Apply selected**. Referenced interfaces remain read-only. |
 
 Generated parameters normalize numeric text such as `1,000` to `1000` and retain
 line breaks in descriptions. Generation uses a temporary file before replacing
 the output. A parameter sheet with multiple `Status` headers stops generation.
 
 Preview reads **Data Interfaces in Architectural Data** directly from the
-configured SLDD. Only buses named in the selected Excel sheets are compared;
-other SLDD buses are ignored. For those buses, expected elements come from all
-workbook sheets to protect shared elements. Service/Physical Interfaces and
-buses in Design Data are excluded. Excel names matching Service/Physical Interfaces
-are ignored instead of becoming additions. No exporter or intermediate Excel is needed.
+configured SLDD. The GUI compares the rows in the selected Excel sheets against
+their matching SLDD buses. Select every relevant sheet to check conflicts between
+their rows. A shared `Bus.Element` is a single SLDD element, so changes to it
+affect every model using it. Service/Physical Interfaces and buses in Design Data
+are excluded. Excel names matching Service/Physical Interfaces are ignored instead
+of becoming additions. No exporter or intermediate Excel is needed.
 
 ADD/REMOVE rows show `element` in Property. ADD shows the Excel definition and
 `<missing>` in SLDD; REMOVE shows `Status=remove` and the current SLDD definition.
@@ -318,17 +319,17 @@ is needed. Turn it off to pause the view while reading earlier entries, then
 turn it on to catch up. The status line continues updating while the view is paused.
 
 An element missing from the SLDD is eligible for **ADD** only when at least one
-Excel row for that element in the compared buses has the exact **`Status = Accept`**
+Excel row read for that element has the exact **`Status = Accept`**
 value. Case and spaces matter. Multiple `Status` headers for a compared bus stop
 comparison.
 
 Only Excel rows with **`Status = remove`** propose a deletion (case-insensitive,
 with surrounding spaces ignored). Missing/blank/other Status values and elements
 absent from Excel never authorize deletion. Remove rows do not create additions
-or property differences, and need no DataType. Conflicting remove/keep rows for
-the same compared `Bus.Element` across sheets stop comparison before any edits.
-Conflicting specified Unit/Description values across shared sheets are also
-rejected. Conflicts in buses outside the selected scope are ignored.
+or property differences, and need no DataType. Comparison stops before any edits
+if the sheets being read disagree on whether to remove the same `Bus.Element`
+or specify conflicting Unit/Description values for it. Conflicts outside the
+selected buses are ignored.
 
 Run **Preview differences**, tick individual **Apply** checkboxes, then click
 **Apply selected**. **Select all changes** and **Clear changes** sit at the left
@@ -361,6 +362,10 @@ An empty `SelectedChanges` table applies nothing. CLI calls without this option
 retain apply-all behavior; `opts.Mode` defaults to preview. Both backends accept
 an optional `opts.LogFcn = @(message) ...` progress callback (fourth argument;
 parameter generation keeps its sheet selection as the third argument).
+By default, the sync CLI reads all workbook sheets to validate rows for buses
+in the requested sheets. Set `opts.IncludeSharedSheets = false` to read only the
+requested sheets, as in the GUI. With this option, use a cell array such as
+`{'all'}` for a literal sheet name or scalar `"all"` for the whole workbook.
 
 Preview never edits or saves the SLDD. Apply protects pending edits in the
 dictionary and its references, keeps empty interfaces, and rolls back failed

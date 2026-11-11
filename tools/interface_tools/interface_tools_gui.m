@@ -11,7 +11,7 @@ function fig = interface_tools_gui(opts)
 % Preview lists every ADD/REMOVE/PROPERTY_DIFF as bus.element in a table.
 % Tick individual element/property changes, then Apply selected. Preview is required.
 % Referenced interfaces cannot be selected.
-% Only buses named in selected Excel sheets are compared.
+% Preview and Apply read only the selected Excel sheets and compare their buses.
 % ADD requires the exact Status value Accept.
 % REMOVE requires Status=remove in Excel; elements absent from Excel are kept.
 %
@@ -322,10 +322,6 @@ function fig = interface_tools_gui(opts)
                 appendLog('No editable changes selected.');
                 return;
             end
-            applyOptions = struct('Mode', 'apply', ...
-                'SelectedChanges', previewReport.Changes(chosen, :), ...
-                'ExpectedSnapshot', {previewReport.Snapshot}, ...
-                'LogFcn', @(message) appendLog(message, false));
         end
         if doParams && isfile(parametersFile)
             choice = uiconfirm(fig, ...
@@ -339,8 +335,14 @@ function fig = interface_tools_gui(opts)
         try
             if doSync
                 appendLog(sprintf('%s: %d model(s): %s', upper(task), numel(selected), strjoin(selected, ', ')));
-                requested = selected;
+                requested = cellstr(selected);
+                previewOptions = struct('Mode', 'preview', 'IncludeSharedSheets', false, ...
+                    'LogFcn', @(message) appendLog(message, false));
                 if doApply
+                    applyOptions = previewOptions;
+                    applyOptions.Mode = 'apply';
+                    applyOptions.SelectedChanges = previewReport.Changes(chosen, :);
+                    applyOptions.ExpectedSnapshot = previewReport.Snapshot;
                     appendLog(sprintf('Applying %d selected changes ...', sum(chosen)));
                     summary = sync_bus_interfaces_from_excel(source, slddFile, requested, applyOptions);
                     appendLog(sprintf('Applied: ADD=%d REMOVE=%d UPDATE=%d SAVED=%d', ...
@@ -349,7 +351,6 @@ function fig = interface_tools_gui(opts)
                 resetPreview();
                 detailLabel.Text = 'Comparing Excel buses with SLDD ...';
                 drawnow;
-                previewOptions = struct('Mode', 'preview', 'LogFcn', @(message) appendLog(message, false));
                 previewReport = sync_bus_interfaces_from_excel(source, slddFile, requested, previewOptions);
                 detailTable.Data = [num2cell(false(height(previewReport.Changes), 1)), ...
                     table2cell(previewReport.Changes)];

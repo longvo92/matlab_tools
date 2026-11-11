@@ -63,6 +63,10 @@
 
 ## Interface tools
 
+### Unreleased
+
+- Read only the selected model sheets for GUI interface Preview and Apply.
+
 ### 1.10.2 - 2026-10-26
 
 - Generate correct numeric values and preserve multiline descriptions; keep the
