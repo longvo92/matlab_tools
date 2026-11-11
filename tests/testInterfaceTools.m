@@ -535,6 +535,10 @@ function local_testComparisonScope(sandbox)
     assert(preview.Buses == 1 && preview.OutOfScope == 2);
     assert(all(startsWith(preview.Changes.Interface, 'Valid.')) && all(preview.Selectable));
     assert(isequal(before, local_bytes(file)));
+    scopedOptions = struct('IncludeSharedSheets', false);
+    scoped = sync_bus_interfaces_from_excel(source, file, 'Selected', scopedOptions);
+    assert(scoped.ToAdd == 0 && scoped.ToRemove == 1 && scoped.MetadataMismatch == 0);
+    assert(isequal(scoped.Changes.Interface, {'Valid.Old'}));
     config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
         '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
     config.SourceXlsx = source;
@@ -551,7 +555,7 @@ function local_testComparisonScope(sandbox)
     button = findall(fig, 'Tag', 'PreviewSldd');
     button.ButtonPushedFcn(button, []);
     details = findall(fig, 'Tag', 'InterfaceDifferences');
-    assert(size(details.Data, 1) == 2 && all(startsWith(details.Data(:, 3), 'Valid.')));
+    assert(isequal(details.Data(:, 2:end), table2cell(scoped.Changes)));
     selectAll = findall(fig, 'Tag', 'SelectChanges');
     selectAll.ButtonPushedFcn(selectAll, []);
     assert(all(cell2mat(details.Data(:, 1))));
@@ -785,15 +789,17 @@ function local_testReviewedRegressions(sandbox)
         'VisibleBus', 'Padded', 'double', ' Accept ', 'pPadded', 7; ...
         'VisibleBus', 'Lowercase', 'double', 'accept', 'pLowercase', 8; ...
         'OtherBus', 'Blank', 'double', '', 'pBlank', 9}], ...
-        workbook, 'Sheet', 'Visible');
+        workbook, 'Sheet', 'All');
     writecell([header; {'HiddenBus', 'H', 'double', 'Accept', 'pOtherSheet', 8; ...
         'HiddenBus', 'I', 'double', 'ACCEPT', 'pUppercase', 9; ...
         'HiddenBus', 'J', 'double', ' Accept ', 'pWidePadded', 10; ...
         'HiddenBus', 'K', 'double', 'not used', 'pWideNotUsed', 11; ...
-        'HiddenBus', 'L', 'double', '', 'pWideBlank', 12}], ...
+        'HiddenBus', 'L', 'double', '', 'pWideBlank', 12; ...
+        'VisibleBus', 'UnselectedOnly', 'double', 'Accept', '', ''}], ...
         workbook, 'Sheet', 'Wide', 'Range', 'BA35');
     wide = sync_bus_interfaces_from_excel(workbook, dictionary, 'Wide', 'preview');
-    assert(wide.ToAdd == 1 && isequal(wide.Changes.Interface, {'HiddenBus.H'}));
+    assert(wide.ToAdd == 3 && ...
+        isequal(wide.Changes.Interface, {'HiddenBus.H'; 'VisibleBus.UnselectedOnly'; 'VisibleBus.V'}));
     config = jsondecode(fileread(fullfile(fileparts(mfilename('fullpath')), ...
         '..', 'tools', 'interface_tools', 'interface_tools_config.json')));
     config.SourceXlsx = workbook;
@@ -806,8 +812,8 @@ function local_testReviewedRegressions(sandbox)
     figCleanup = onCleanup(@() delete(fig));
     sheets = findall(fig, 'Tag', 'SyncSheets');
     assert(strcmp(fig.Name, 'Interface Tools'));
-    assert(isequal(sort(string(sheets.Items)), ["Visible", "Wide"]));
-    sheets.Value = {'Visible'};
+    assert(isequal(sort(string(sheets.Items)), ["All", "Wide"]));
+    sheets.Value = {'All'};
     sheets.ValueChangedFcn(sheets, []);
     button = findall(fig, 'Tag', 'PreviewSldd');
     button.ButtonPushedFcn(button, []);
@@ -824,6 +830,10 @@ function local_testReviewedRegressions(sandbox)
     assert(isvalid(fig) && getappdata(fig, 'ReviewCloseAttempted'));
     assert(isempty(details.Data) && strcmp(button.Enable, 'off'));
     clear timerCleanup;
+    activity = findall(fig, 'Tag', 'ActivityLog');
+    sheetReads = regexp(strjoin(activity.Value, newline), '\[READ XLSX\][^\r\n]+', 'match');
+    assert(isequal(sheetReads, repmat({'[READ XLSX] 1/1: All'}, 1, 3)), ...
+        'Preview, Apply, and the refreshed preview must read only the selected sheet.');
     dd = Simulink.dictionary.archdata.open(dictionary);
     assert(isequal(getInterfaceNames(dd), {'VisibleBus'}));
     assert(isequal({getInterface(dd, 'VisibleBus').Elements.Name}, {'V'}));

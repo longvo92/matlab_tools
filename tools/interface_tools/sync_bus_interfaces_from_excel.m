@@ -21,6 +21,8 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 % include Property when selecting PROPERTY_DIFF rows to identify each field;
 % an empty selection applies nothing. Omit it to retain legacy apply-all behavior.
 % ExpectedSnapshot rejects changes to compared data since Preview.
+% Set opts.IncludeSharedSheets to false to read only the selected sheets.
+% In that mode, a cell array of sheet names is literal (including {'all'}).
 % opts.LogFcn is an optional @(message) callback for live progress messages.
 % Legacy (source, sldd, sheets, exportXlsx, mode) calls remain accepted;
 % the export path is ignored and never read, written, or deleted.
@@ -38,9 +40,10 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
 %     absent from Excel are kept. Remove rows never propose additions.
 %   - Conflicting remove/keep rows for a compared Bus.Element abort comparison.
 %     Conflicts in buses outside the selected scope are ignored.
-%   - A selected sheet identifies the affected buses. For those buses,
-%     expected elements are collected from ALL source sheets, protecting
-%     elements shared across sheets from accidental deletion.
+%   - A selected sheet identifies the affected buses. By default, expected
+%     elements for those buses are collected from all source sheets for
+%     shared-element validation. IncludeSharedSheets=false limits source
+%     rows and validation to the selected sheets.
 %   - Buses absent from the selected sheets are NEVER deleted/changed.
 %     Buses not named in Excel are ignored, including in all-sheet mode.
 %   - Empty Data Interfaces are inventoried but never removed.
@@ -74,6 +77,11 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     if isfield(opts, 'LogFcn') && ~isempty(opts.LogFcn)
         validateattributes(opts.LogFcn, {'function_handle'}, {'scalar'});
     end
+    includeSharedSheets = true;
+    if isfield(opts, 'IncludeSharedSheets')
+        validateattributes(opts.IncludeSharedSheets, {'logical'}, {'scalar'});
+        includeSharedSheets = opts.IncludeSharedSheets;
+    end
     logMessage = @(varargin) local_log(opts, varargin{:});
     mode = lower(strtrim(string(mode)));
     if ~isscalar(mode) || ~ismember(mode, ["apply", "preview"])
@@ -88,10 +96,13 @@ function summary = sync_bus_interfaces_from_excel(xlsxFile, slddFile, selectedSh
     slddFile = existingFullPath(slddFile, 'SLDD');
 
     sourceSheets = cellstr(sheetnames(xlsxFile));
-    targetSheets = resolveSheets(selectedSheets, sourceSheets);
+    targetSheets = resolveSheets(selectedSheets, sourceSheets, includeSharedSheets || ~iscell(selectedSheets));
+    readSheets = targetSheets;
+    if includeSharedSheets, readSheets = sourceSheets; end
 
     % Collect scope before validating shared rows, regardless of sheet order.
-    [sourceRows, selectedBuses] = readSourceWorkbook(xlsxFile, sourceSheets, targetSheets, logMessage);
+    [sourceRows, selectedBuses] = readSourceWorkbook(xlsxFile, readSheets, targetSheets, ...
+        numel(targetSheets) == numel(sourceSheets), logMessage);
 
     summary = struct('Sheets', numel(targetSheets), 'Buses', numel(keys(selectedBuses)), ...
         'Compared', 0, 'ToAdd', 0, 'ToRemove', 0, 'MetadataMismatch', 0, ...
@@ -227,7 +238,7 @@ function local_requireCleanDictionary(file, checked)
     end
 end
 
-function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets, logMessage)
+function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedSheets, allSelected, logMessage)
     records = {};
     selectedBuses = containers.Map('KeyType', 'char', 'ValueType', 'logical');
 
@@ -237,8 +248,9 @@ function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedShe
         % Start at column A so the detected Status index is a worksheet column.
         raw = readcell(file, 'Sheet', sheet, 'Range', 'A1');
         [headerRow, cols] = detectHeaders(raw, {'Bus', 'Element'});
+        selected = ismember(sheet, selectedSheets);
         if headerRow == 0
-            if ismember(sheet, selectedSheets) && numel(selectedSheets) < numel(sheets)
+            if selected && ~allSelected
                 error('Selected sheet "%s" does not contain Bus/Element columns.', sheet);
             end
             continue; % Ignore notes/metadata sheets in all-sheet mode.
@@ -253,7 +265,6 @@ function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedShe
             statusTable = readtable(file, statusOptions);
             accepted = strcmp(statusTable{end-size(raw, 1)+1:end, 1}, 'Accept');
         end
-        selected = ismember(sheet, selectedSheets);
         previousBus = '';
         for r = headerRow+1:size(raw, 1)
             bus = getText(raw, r, cols.bus);
@@ -280,7 +291,7 @@ function [records, selectedBuses] = readSourceWorkbook(file, sheets, selectedShe
 end
 
 function expected = local_mergeSourceRows(records, scope)
-% Validate only compared buses, including their rows in unselected sheets.
+% Validate rows from the sheets read for buses in scope.
     expected = containers.Map('KeyType', 'char', 'ValueType', 'any');
     for i = 1:numel(records)
         rec = records{i};
@@ -751,9 +762,9 @@ function vec = parseDimension(raw)
     vec = nums;
 end
 
-function selected = resolveSheets(requested, allSheets)
+function selected = resolveSheets(requested, allSheets, allowAll)
     requested = cellstr(string(requested));
-    if numel(requested) == 1 && strcmpi(strtrim(requested{1}), 'all')
+    if allowAll && numel(requested) == 1 && strcmpi(strtrim(requested{1}), 'all')
         selected = allSheets;
     else
         selected = unique(requested, 'stable');
