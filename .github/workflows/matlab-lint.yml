@@ -5,17 +5,19 @@ name: MATLAB lint
 # code analyzer, so no MATLAB license or self-hosted runner is needed.
 
 on:
-  push:
-    paths:
-      - '**/*.m'
-      - miss_hit.cfg
-      - .github/workflows/matlab-lint.yml
+  # CI runs on pull requests only. GitHub tests the PR merged into main, so
+  # the merge commit is not re-tested; resolving a conflict pushes to the PR
+  # and re-runs it. Use workflow_dispatch for a manual run.
   pull_request:
     paths:
       - '**/*.m'
       - miss_hit.cfg
       - .github/workflows/matlab-lint.yml
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
